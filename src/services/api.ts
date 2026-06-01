@@ -7,8 +7,11 @@ import {
   type UserRole,
 } from "@/routes/route-role";
 
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
+
 export const api = axios.create({
-  baseURL: "http://localhost:3000",
+  baseURL: API_BASE_URL,
 });
 
 export const authSessionExpiredEvent = "arenaos:auth-session-expired";
@@ -62,7 +65,7 @@ async function refreshAccessToken(refreshToken: string) {
   if (!refreshRequest) {
     refreshRequest = axios
       .post<RefreshResponse>(
-        "http://localhost:3000/auth/refresh",
+        `${API_BASE_URL}/auth/refresh`,
         {},
         {
           headers: {
