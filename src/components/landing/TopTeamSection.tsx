@@ -1,42 +1,15 @@
+import type { LandingTopTeam } from "@/services/landing.service";
 import { motion } from "framer-motion";
 import { Crown, Shield, TrendingUp } from "lucide-react";
 
-const teams = [
-  {
-    rank: 1,
-    name: "Nova X",
-    region: "SEA",
-    wins: 24,
-    losses: 3,
-    winRate: "88%",
-  },
-  {
-    rank: 2,
-    name: "Shadow Rift",
-    region: "VN",
-    wins: 21,
-    losses: 5,
-    winRate: "80%",
-  },
-  {
-    rank: 3,
-    name: "Cyber Wolves",
-    region: "TH",
-    wins: 19,
-    losses: 7,
-    winRate: "73%",
-  },
-  {
-    rank: 4,
-    name: "Titan Core",
-    region: "PH",
-    wins: 17,
-    losses: 9,
-    winRate: "65%",
-  },
-];
+type TopTeamsSectionProps = {
+  loading: boolean;
+  teams: LandingTopTeam[];
+};
 
-export function TopTeamsSection() {
+export function TopTeamsSection({ loading, teams }: TopTeamsSectionProps) {
+  const champion = teams[0] ?? null;
+
   return (
     <section className="relative border-t border-white/10 bg-[#0B1020] px-6 py-24">
       <div className="mx-auto max-w-7xl">
@@ -74,73 +47,93 @@ export function TopTeamsSection() {
               CURRENT CHAMPION
             </p>
 
-            <h3 className="mt-4 text-4xl font-black">Nova X</h3>
+            <h3 className="mt-4 text-4xl font-black">
+              {loading ? "Loading..." : champion?.name ?? "No teams yet"}
+            </h3>
 
             <p className="mt-4 text-white/60">
-              The most consistent team this season with dominant performance
-              across multiple ArenaOS tournaments.
+              Ranked from real ArenaOS team statistics, including wins, losses
+              and champion count.
             </p>
 
             <div className="mt-8 grid grid-cols-3 gap-3">
               <div className="rounded-2xl bg-black/30 p-4">
                 <p className="text-sm text-white/50">Wins</p>
-                <p className="mt-1 text-2xl font-black">24</p>
+                <p className="mt-1 text-2xl font-black">
+                  {champion?.wins ?? 0}
+                </p>
               </div>
 
               <div className="rounded-2xl bg-black/30 p-4">
                 <p className="text-sm text-white/50">Winrate</p>
-                <p className="mt-1 text-2xl font-black">88%</p>
+                <p className="mt-1 text-2xl font-black">
+                  {champion?.winRate ?? 0}%
+                </p>
               </div>
 
               <div className="rounded-2xl bg-black/30 p-4">
-                <p className="text-sm text-white/50">Region</p>
-                <p className="mt-1 text-2xl font-black">SEA</p>
+                <p className="text-sm text-white/50">Titles</p>
+                <p className="mt-1 text-2xl font-black">
+                  {champion?.championCount ?? 0}
+                </p>
               </div>
             </div>
           </motion.div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl">
-            <div className="space-y-4">
-              {teams.map((team, index) => (
-                <motion.div
-                  key={team.name}
-                  initial={{ opacity: 0, y: 25 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  viewport={{ once: true }}
-                  className="grid items-center gap-4 rounded-3xl border border-white/10 bg-black/30 p-5 transition hover:border-cyan-400/50 hover:bg-white/[0.06] md:grid-cols-[70px_1fr_120px_120px_120px]"
-                >
-                  <div className="flex size-12 items-center justify-center rounded-2xl bg-white/10 text-xl font-black">
-                    #{team.rank}
-                  </div>
-
-                  <div className="flex items-center gap-4">
-                    <div className="flex size-12 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-300">
-                      <Shield />
+            {loading ? (
+              <div className="rounded-3xl bg-black/30 p-5 text-white/60">
+                Loading rankings...
+              </div>
+            ) : teams.length === 0 ? (
+              <div className="rounded-3xl bg-black/30 p-5 text-white/60">
+                No team ranking data yet.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {teams.map((team, index) => (
+                  <motion.div
+                    key={team.id}
+                    initial={{ opacity: 0, y: 25 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    viewport={{ once: true }}
+                    className="grid items-center gap-4 rounded-3xl border border-white/10 bg-black/30 p-5 transition hover:border-cyan-400/50 hover:bg-white/[0.06] md:grid-cols-[70px_1fr_120px_120px_120px]"
+                  >
+                    <div className="flex size-12 items-center justify-center rounded-2xl bg-white/10 text-xl font-black">
+                      #{team.rank}
                     </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="flex size-12 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-300">
+                        <Shield />
+                      </div>
+                      <div>
+                        <p className="font-black">{team.name}</p>
+                        <p className="text-sm text-white/50">
+                          {team.matchesPlayed} matches
+                        </p>
+                      </div>
+                    </div>
+
                     <div>
-                      <p className="font-black">{team.name}</p>
-                      <p className="text-sm text-white/50">{team.region}</p>
+                      <p className="text-sm text-white/50">Wins</p>
+                      <p className="font-bold">{team.wins}</p>
                     </div>
-                  </div>
 
-                  <div>
-                    <p className="text-sm text-white/50">Wins</p>
-                    <p className="font-bold">{team.wins}</p>
-                  </div>
+                    <div>
+                      <p className="text-sm text-white/50">Losses</p>
+                      <p className="font-bold">{team.losses}</p>
+                    </div>
 
-                  <div>
-                    <p className="text-sm text-white/50">Losses</p>
-                    <p className="font-bold">{team.losses}</p>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-cyan-300">
-                    <TrendingUp size={18} />
-                    <p className="font-black">{team.winRate}</p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+                    <div className="flex items-center gap-2 text-cyan-300">
+                      <TrendingUp size={18} />
+                      <p className="font-black">{team.winRate}%</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

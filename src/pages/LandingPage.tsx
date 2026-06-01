@@ -4,9 +4,42 @@ import { Hero3DScene } from "@/components/landing/Hero3DScene";
 import { LiveTournamentsSection } from "@/components/landing/LiveTournamentsSection";
 import { PlatformFeaturesSection } from "@/components/landing/PlatformFeaturesSection";
 import { TopTeamsSection } from "@/components/landing/TopTeamSection";
+import {
+  getLandingOverview,
+  type LandingOverview,
+} from "@/services/landing.service";
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 
 export function LandingPage() {
+  const [overview, setOverview] = useState<LandingOverview | null>(null);
+  const [loadingOverview, setLoadingOverview] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    getLandingOverview()
+      .then((res) => {
+        if (mounted) {
+          setOverview(res.data);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setOverview(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setLoadingOverview(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <>
       <section className="relative overflow-hidden">
@@ -65,9 +98,18 @@ export function LandingPage() {
         </div>
       </section>
 
-      <LiveTournamentsSection />
-      <BracketPreviewSection />
-      <TopTeamsSection />
+      <LiveTournamentsSection
+        loading={loadingOverview}
+        tournaments={overview?.tournaments ?? []}
+      />
+      <BracketPreviewSection
+        bracket={overview?.bracket ?? null}
+        loading={loadingOverview}
+      />
+      <TopTeamsSection
+        loading={loadingOverview}
+        teams={overview?.topTeams ?? []}
+      />
       <PlatformFeaturesSection />
       <CTASection />
     </>
