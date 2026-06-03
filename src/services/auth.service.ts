@@ -12,6 +12,29 @@ export type RegisterPayload = {
   password: string;
 };
 
+export type GoogleLoginPayload = {
+  idToken: string;
+};
+
+export type ForgotPasswordPayload = {
+  email: string;
+};
+
+export type ResetPasswordPayload = {
+  email: string;
+  otp: string;
+  newPassword: string;
+};
+
+export type VerifyResetOtpPayload = {
+  email: string;
+  otp: string;
+};
+
+export type AuthMessageResponse = {
+  message: string;
+};
+
 export type AuthResponse = {
   message: string;
   data: {
@@ -22,6 +45,7 @@ export type AuthResponse = {
       id: string;
       email: string;
       username: string;
+      avatarUrl?: string | null;
       role: UserRole;
     };
   };
@@ -33,12 +57,49 @@ export type CurrentUserResponse = {
     sub: string;
     email: string;
     username: string;
+    avatarUrl: string | null;
     role: UserRole;
+    status: string;
   };
 };
 
+export type UpdateProfilePayload = {
+  username?: string;
+  avatarUrl?: string | null;
+};
+
+export type UpdateProfileResponse = CurrentUserResponse;
+
 export async function login(payload: LoginPayload): Promise<AuthResponse> {
   const res = await api.post("/auth/login", payload);
+  return res.data;
+}
+
+export async function googleLogin(
+  payload: GoogleLoginPayload,
+): Promise<AuthResponse> {
+  const res = await api.post("/auth/google", payload);
+  return res.data;
+}
+
+export async function forgotPassword(
+  payload: ForgotPasswordPayload,
+): Promise<AuthMessageResponse> {
+  const res = await api.post("/auth/forgot-password", payload);
+  return res.data;
+}
+
+export async function resetPassword(
+  payload: ResetPasswordPayload,
+): Promise<AuthMessageResponse> {
+  const res = await api.post("/auth/reset-password", payload);
+  return res.data;
+}
+
+export async function verifyResetOtp(
+  payload: VerifyResetOtpPayload,
+): Promise<AuthMessageResponse> {
+  const res = await api.post("/auth/verify-reset-otp", payload);
   return res.data;
 }
 
@@ -54,11 +115,18 @@ export async function getMe(): Promise<CurrentUserResponse> {
   return res.data;
 }
 
+export async function updateProfile(
+  payload: UpdateProfilePayload,
+): Promise<UpdateProfileResponse> {
+  const res = await api.patch("/auth/me", payload);
+  return res.data;
+}
+
 export async function refreshAuthToken(
   refreshToken: string,
 ): Promise<AuthResponse> {
   const res = await api.post(
-    "/auth/refresh",
+    "/auth/refresh-token",
     {},
     {
       headers: {

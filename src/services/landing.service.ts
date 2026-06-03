@@ -47,10 +47,18 @@ export type LandingBracket = {
   matches: LandingBracketMatch[];
 } | null;
 
+export type LandingFeature = {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+};
+
 export type LandingOverview = {
   tournaments: LandingTournament[];
   topTeams: LandingTopTeam[];
   bracket: LandingBracket;
+  features: LandingFeature[];
 };
 
 export async function getLandingOverview() {

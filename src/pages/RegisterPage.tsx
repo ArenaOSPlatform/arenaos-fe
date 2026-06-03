@@ -1,8 +1,20 @@
+import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Mail, LockKeyhole, UserPlus, User } from "lucide-react";
-import { useState } from "react";
+import {
+  ArrowRight,
+  Eye,
+  EyeOff,
+  Loader2,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+  Trophy,
+  User,
+  UserPlus,
+} from "lucide-react";
+import { type FormEvent, useState } from "react";
 import { register } from "@/services/auth.service";
-import { useToast } from "@/components/ui";
+import { useToast } from "@/hooks/useToast";
 import {
   clearStoredUserRole,
   getAccessTokenRole,
@@ -11,6 +23,26 @@ import {
   setStoredUserRole,
 } from "@/routes/route-role";
 
+function getEmailLooksValid(value: string) {
+  return /^\S+@\S+\.\S+$/.test(value.trim());
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError(error)) {
+    const message = error.response?.data?.message;
+
+    if (typeof message === "string") {
+      return message;
+    }
+
+    if (Array.isArray(message)) {
+      return message.join(". ");
+    }
+  }
+
+  return fallback;
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -18,12 +50,39 @@ export function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  async function handleRegister() {
+  const usernameReady = username.trim().length >= 3;
+  const emailReady = getEmailLooksValid(email);
+  const passwordReady = password.trim().length >= 6;
+  const formReady = usernameReady && emailReady && passwordReady;
+
+  async function handleRegister(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!usernameReady) {
+      toast.warning("Username must be at least 3 characters.");
+      return;
+    }
+
+    if (!emailReady) {
+      toast.warning("Enter a valid email address.");
+      return;
+    }
+
+    if (!passwordReady) {
+      toast.warning("Password must be at least 6 characters.");
+      return;
+    }
+
     try {
       setLoading(true);
 
-      const res = await register({ username, email, password });
+      const res = await register({
+        username: username.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+      });
 
       localStorage.setItem("accessToken", res.data.accessToken);
       localStorage.setItem("refreshToken", res.data.refreshToken);
@@ -44,95 +103,225 @@ export function RegisterPage() {
       setStoredUserRole(role);
       toast.success("Account created successfully.");
       navigate(roleHomePath[role]);
-    } catch {
-      toast.error("Register failed. Check your information and try again.");
+    } catch (error) {
+      toast.error(
+        getApiErrorMessage(
+          error,
+          "Register failed. Check your information and try again.",
+        ),
+      );
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#0B1020] px-6 py-16">
-      <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/[0.04] p-8 backdrop-blur-xl">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-5 flex size-16 items-center justify-center rounded-3xl bg-cyan-400 text-black">
-            <UserPlus size={30} />
-          </div>
+    <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.1),transparent_35%),radial-gradient(circle_at_80%_80%,rgba(139,92,246,0.1),transparent_35%),linear-gradient(180deg,#050816_0%,#08111f_48%,#050816_100%)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:64px_64px] opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent_88%)]" />
 
-          <h1 className="text-4xl font-black">Join ArenaOS</h1>
-          <p className="mt-3 text-white/60">
-            Create your player account and enter the arena.
-          </p>
-        </div>
+      <main className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(420px,0.75fr)]">
+        <section className="hidden lg:block">
+          <div className="max-w-2xl">
+            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-black uppercase text-cyan-100">
+              <UserPlus className="size-4" aria-hidden="true" />
+              ArenaOS onboarding
+            </span>
 
-        <form className="space-y-5">
-          <div>
-            <label className="mb-2 block text-sm font-bold text-white/70">
-              Username
-            </label>
-            <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4">
-              <User size={18} className="text-cyan-400" />
-              <input
-                type="text"
-                placeholder="NovaPlayer"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                className="w-full bg-transparent py-4 outline-none placeholder:text-white/30"
-              />
+            <h1 className="mt-7 text-6xl font-black leading-none text-white">
+              Build your player identity for the arena.
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-8 text-slate-300">
+              Join tournaments, manage team access, and move into the right
+              workspace automatically after registration.
+            </p>
+
+            <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+                <User className="mb-3 size-5 text-cyan-200" />
+                <p className="text-sm font-black text-white">Profile</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  Start with a clean player handle.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+                <Trophy className="mb-3 size-5 text-amber-200" />
+                <p className="text-sm font-black text-white">Arena Access</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  Enter public events and match rooms.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+                <ShieldCheck className="mb-3 size-5 text-emerald-200" />
+                <p className="text-sm font-black text-white">Secure Role</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  Route into the right dashboard.
+                </p>
+              </div>
             </div>
           </div>
+        </section>
 
-          <div>
-            <label className="mb-2 block text-sm font-bold text-white/70">
-              Email
-            </label>
-            <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4">
-              <Mail size={18} className="text-cyan-400" />
-              <input
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="w-full bg-transparent py-4 outline-none placeholder:text-white/30"
-              />
+        <section className="w-full">
+          <div className="relative mx-auto w-full max-w-md overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.055] shadow-[0_28px_110px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/60 to-transparent" />
+            <div className="border-b border-white/10 p-6 text-center sm:p-8">
+              <div className="mx-auto mb-5 flex size-16 items-center justify-center rounded-3xl bg-cyan-300 text-slate-950 shadow-[0_18px_55px_rgba(103,232,249,0.22)]">
+                <UserPlus className="size-8" aria-hidden="true" />
+              </div>
+
+              <h2 className="text-4xl font-black leading-none text-white">
+                Join ArenaOS
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Create your player account and enter the arena.
+              </p>
+            </div>
+
+            <form onSubmit={handleRegister} className="space-y-5 p-6 sm:p-8">
+              <label className="block">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-sm font-black text-slate-300">
+                    Username
+                  </span>
+                  {username && (
+                    <span
+                      className={[
+                        "text-xs font-bold",
+                        usernameReady ? "text-emerald-200" : "text-amber-200",
+                      ].join(" ")}
+                    >
+                      {usernameReady ? "Ready" : "3+ chars"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex min-h-13 items-center gap-3 rounded-2xl border border-white/10 bg-[#070b16] px-4 transition focus-within:border-cyan-200/50 focus-within:ring-4 focus-within:ring-cyan-300/10">
+                  <User className="size-5 text-cyan-300" aria-hidden="true" />
+                  <input
+                    type="text"
+                    placeholder="NovaPlayer"
+                    value={username}
+                    autoComplete="username"
+                    onChange={(event) => setUsername(event.target.value)}
+                    className="w-full bg-transparent py-4 text-sm font-medium text-white outline-none placeholder:text-slate-600"
+                  />
+                </div>
+              </label>
+
+              <label className="block">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-sm font-black text-slate-300">
+                    Email
+                  </span>
+                  {email && (
+                    <span
+                      className={[
+                        "text-xs font-bold",
+                        emailReady ? "text-emerald-200" : "text-amber-200",
+                      ].join(" ")}
+                    >
+                      {emailReady ? "Ready" : "Check format"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex min-h-13 items-center gap-3 rounded-2xl border border-white/10 bg-[#070b16] px-4 transition focus-within:border-cyan-200/50 focus-within:ring-4 focus-within:ring-cyan-300/10">
+                  <Mail className="size-5 text-cyan-300" aria-hidden="true" />
+                  <input
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    autoComplete="email"
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="w-full bg-transparent py-4 text-sm font-medium text-white outline-none placeholder:text-slate-600"
+                  />
+                </div>
+              </label>
+
+              <label className="block">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-sm font-black text-slate-300">
+                    Password
+                  </span>
+                  {password && (
+                    <span
+                      className={[
+                        "text-xs font-bold",
+                        passwordReady ? "text-emerald-200" : "text-amber-200",
+                      ].join(" ")}
+                    >
+                      {passwordReady ? "Ready" : "6+ chars"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex min-h-13 items-center gap-3 rounded-2xl border border-white/10 bg-[#070b16] px-4 transition focus-within:border-cyan-200/50 focus-within:ring-4 focus-within:ring-cyan-300/10">
+                  <LockKeyhole
+                    className="size-5 text-cyan-300"
+                    aria-hidden="true"
+                  />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="password"
+                    value={password}
+                    autoComplete="new-password"
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="w-full bg-transparent py-4 text-sm font-medium text-white outline-none placeholder:text-slate-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((value) => !value)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="size-4" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+              </label>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="group inline-flex min-h-13 w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 shadow-[0_18px_55px_rgba(103,232,249,0.22)] transition duration-200 hover:-translate-y-0.5 hover:bg-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050816] active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0"
+              >
+                {loading ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <UserPlus className="size-4" aria-hidden="true" />
+                )}
+                Create Account
+                {!loading && (
+                  <ArrowRight
+                    className="size-4 transition group-hover:translate-x-1"
+                    aria-hidden="true"
+                  />
+                )}
+              </button>
+
+              {!formReady && (
+                <p className="rounded-2xl border border-white/10 bg-black/20 p-3 text-center text-xs font-bold leading-5 text-slate-500">
+                  Username, email, and password must be ready before creating an
+                  account.
+                </p>
+              )}
+            </form>
+
+            <div className="border-t border-white/10 px-6 py-5 text-center sm:px-8">
+              <p className="text-sm text-slate-400">
+                Already have an account?{" "}
+                <Link
+                  to="/login"
+                  className="font-black text-cyan-200 transition hover:text-white"
+                >
+                  Login
+                </Link>
+              </p>
             </div>
           </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-bold text-white/70">
-              Password
-            </label>
-            <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4">
-              <LockKeyhole size={18} className="text-cyan-400" />
-              <input
-                type="password"
-                placeholder="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="w-full bg-transparent py-4 outline-none placeholder:text-white/30"
-              />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleRegister}
-            disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 py-4 font-black text-black hover:bg-cyan-300 disabled:opacity-50"
-          >
-            {loading && <Loader2 size={18} className="animate-spin" />}
-            Create Account
-          </button>
-        </form>
-
-        <p className="mt-6 text-center text-sm text-white/50">
-          Already have an account?{" "}
-          <Link to="/login" className="font-bold text-cyan-400">
-            Login
-          </Link>
-        </p>
-
-      </div>
+        </section>
+      </main>
     </div>
   );
 }

@@ -2,22 +2,25 @@ import { useEffect, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
+  ClipboardCheck,
+  Code2,
   Loader2,
   LogOut,
+  Menu,
+  MessageCircle,
+  Radio,
   Shield,
   Sword,
   Trophy,
   User,
   UserCheck,
   Users,
-  Radio,
-  ClipboardCheck,
+  X,
+  Zap,
 } from "lucide-react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { getMe, logout } from "@/services/auth.service";
-import {
-  authSessionExpiredEvent,
-  clearAuthStorage,
-} from "@/services/api";
+import { authSessionExpiredEvent, clearAuthStorage } from "@/services/api";
 import {
   getMyNotifications,
   markAllNotificationsAsRead,
@@ -25,11 +28,11 @@ import {
 } from "@/services/notification.service";
 import { socket } from "@/sockets/socket";
 import { acceptTeamInvite, rejectTeamInvite } from "@/services/team.service";
-import {
-  getCurrentUserRole,
-  setStoredUserRole,
-} from "@/routes/route-role";
-import { EmptyState, useConfirm, useToast } from "@/components/ui";
+import { getCurrentUserRole, setStoredUserRole } from "@/routes/route-role";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ModeToggle } from "@/components/ui/ModeToggle";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useToast } from "@/hooks/useToast";
 
 type Notification = {
   id: string;
@@ -40,19 +43,172 @@ type Notification = {
   metadata: string | null;
 };
 
+const UI = {
+  motion: {
+    duration: 0.24,
+    ease: [0.22, 1, 0.36, 1],
+  },
+} as const;
+
+function NavLinkItem({
+  to,
+  children,
+  onClick,
+}: {
+  to: string;
+  children: React.ReactNode;
+  onClick?: () => void;
+}) {
+  const location = useLocation();
+  const isActive =
+    to === "/"
+      ? location.pathname === "/"
+      : location.pathname.startsWith(to);
+
+  return (
+    <Link
+      to={to}
+      onClick={onClick}
+      className={[
+        "inline-flex min-h-10 items-center gap-2 rounded-2xl px-3 text-sm font-black transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050816]",
+        isActive
+          ? "bg-cyan-300/10 text-cyan-200 border border-cyan-300/20"
+          : "text-slate-400 hover:bg-white/[0.06] hover:text-cyan-200",
+      ].join(" ")}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function HeaderButton({
+  children,
+  onClick,
+  className = "",
+  ariaLabel,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className={[
+        "inline-flex min-h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] px-4 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl transition duration-200 hover:-translate-y-0.5 hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050816] active:translate-y-0",
+        className,
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function NotificationItem({
+  item,
+  actionId,
+  onRead,
+  onAccept,
+  onReject,
+}: {
+  item: Notification;
+  actionId: string | null;
+  onRead: (id: string) => void;
+  onAccept: (notification: Notification) => void;
+  onReject: (notification: Notification) => void;
+}) {
+  const isHandling = actionId === item.id;
+
+  return (
+    <article
+      className={[
+        "rounded-2xl border p-4 text-left transition duration-200",
+        item.isRead
+          ? "border-white/10 bg-black/25 opacity-70"
+          : "border-cyan-300/20 bg-cyan-300/10 shadow-[0_0_40px_rgba(34,211,238,0.08)]",
+      ].join(" ")}
+    >
+      <button
+        type="button"
+        onClick={() => onRead(item.id)}
+        className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+      >
+        <p className="font-black text-white">{item.title}</p>
+        <p className="mt-1 text-sm leading-6 text-slate-400">{item.message}</p>
+
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+          <p className="font-black uppercase tracking-[0.14em] text-cyan-200">
+            {item.type}
+          </p>
+
+          <span
+            className={[
+              "rounded-full px-2.5 py-1 font-black",
+              item.isRead
+                ? "bg-white/10 text-slate-400"
+                : "bg-emerald-400/15 text-emerald-300",
+            ].join(" ")}
+          >
+            {item.isRead ? "Đã đọc" : "Chưa đọc"}
+          </span>
+        </div>
+      </button>
+
+      {item.type === "TEAM_INVITE" && !item.isRead && (
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => onAccept(item)}
+            disabled={isHandling}
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-cyan-300 px-4 text-xs font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isHandling && <Loader2 className="size-4 animate-spin" />}
+            Accept
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onReject(item)}
+            disabled={isHandling}
+            className="inline-flex min-h-10 items-center rounded-xl bg-red-400 px-4 text-xs font-black text-black transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Reject
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
 export function MainLayout() {
   const toast = useToast();
   const confirm = useConfirm();
+  const shouldReduceMotion = useReducedMotion();
+
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
-  const [notificationActionId, setNotificationActionId] = useState<string | null>(
-    null,
-  );
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notificationActionId, setNotificationActionId] = useState<
+    string | null
+  >(null);
   const [authenticated, setAuthenticated] = useState(() =>
     Boolean(localStorage.getItem("accessToken")),
   );
+
   const location = useLocation();
   const navigate = useNavigate();
+
+  const [prevPathname, setPrevPathname] = useState(location.pathname);
+
+  // Close mobile menu on route change without triggering effect cascade
+  if (location.pathname !== prevPathname) {
+    setPrevPathname(location.pathname);
+    setMobileMenuOpen(false);
+    setOpen(false);
+  }
 
   useEffect(() => {
     async function setupNotifications() {
@@ -76,21 +232,15 @@ export function MainLayout() {
           setStoredUserRole(role);
         }
 
-        console.log("JOIN USER:", userId);
+        if (!socket.connected) socket.connect();
 
-        if (!socket.connected) {
-          socket.connect();
-        }
-
-        socket.emit("join:user", userId);
+        socket.emit("join:user-notifications", userId);
 
         const notiRes = await getMyNotifications();
         setNotifications(notiRes.data);
 
         socket.off("notification:new");
-
         socket.on("notification:new", (data: Notification) => {
-          console.log("FE realtime notification:", data);
           setNotifications((prev) => [data, ...prev]);
           toast.info(data.message, data.title);
         });
@@ -112,6 +262,7 @@ export function MainLayout() {
       setAuthenticated(false);
       setNotifications([]);
       setOpen(false);
+      setMobileMenuOpen(false);
       toast.warning("Session expired. Please log in again.");
       navigate("/login", { replace: true });
     }
@@ -125,9 +276,9 @@ export function MainLayout() {
 
   const userRole = authenticated ? getCurrentUserRole() : null;
   const unreadCount = notifications.filter((item) => !item.isRead).length;
+
   async function handleReadNotification(id: string) {
     await markNotificationAsRead(id);
-
     setNotifications((prev) =>
       prev.map((item) => (item.id === id ? { ...item, isRead: true } : item)),
     );
@@ -165,7 +316,8 @@ export function MainLayout() {
 
     const confirmed = await confirm({
       title: "Reject team invite?",
-      description: "This notification will be marked as handled after rejection.",
+      description:
+        "This notification will be marked as handled after rejection.",
       confirmText: "Reject",
       tone: "danger",
     });
@@ -213,248 +365,441 @@ export function MainLayout() {
     setAuthenticated(false);
     setNotifications([]);
     setOpen(false);
+    setMobileMenuOpen(false);
     toast.info("You have been logged out.");
     navigate("/login");
   }
 
+  // Nav items for reuse in both desktop and mobile
+  const navLinks = (
+    <>
+      <NavLinkItem to="/tournaments">Tournaments</NavLinkItem>
+
+
+
+      <NavLinkItem to="/matches/1">
+        <Radio className="size-4" />
+        Match Room
+      </NavLinkItem>
+
+      {(userRole === "PLAYER" || userRole === "ORGANIZER") && (
+        <>
+          <NavLinkItem to="/team">
+            <Users className="size-4" />
+            Team
+          </NavLinkItem>
+          {userRole === "PLAYER" && (
+            <NavLinkItem to="/become-organizer">
+              <UserCheck className="size-4" />
+              Become Organizer
+            </NavLinkItem>
+          )}
+        </>
+      )}
+
+      {userRole === "ORGANIZER" && (
+        <NavLinkItem to="/organizer">
+          <Shield className="size-4" />
+          Organizer
+        </NavLinkItem>
+      )}
+
+      {userRole === "ADMIN" && (
+        <>
+          <NavLinkItem to="/admin">
+            <Sword className="size-4" />
+            Admin
+          </NavLinkItem>
+          <NavLinkItem to="/admin/organizer-requests">
+            <UserCheck className="size-4" />
+            Organizer Requests
+          </NavLinkItem>
+          <NavLinkItem to="/admin/tournament-approvals">
+            <ClipboardCheck className="size-4" />
+            Tournament Approvals
+          </NavLinkItem>
+        </>
+      )}
+    </>
+  );
+
   return (
-    <div className="min-h-screen bg-[#0B1020] text-white">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/80 backdrop-blur-xl">
-        <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-3 text-2xl font-black">
-            <Trophy className="text-cyan-400" />
-            ArenaOS
+    <div className="min-h-screen bg-[#050816] text-white">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#050816]/80 backdrop-blur-2xl">
+        <nav className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-6 lg:px-8">
+          <Link
+            to="/"
+            className="group flex items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+          >
+            <span className="flex size-11 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.22)] transition duration-300 group-hover:shadow-[0_18px_60px_rgba(34,211,238,0.38)]">
+              <Trophy className="size-6" />
+            </span>
+            <span className="text-2xl font-black tracking-[-0.04em]">
+              ArenaOS
+            </span>
           </Link>
 
-          <div className="hidden items-center gap-6 lg:flex">
-            <Link
-              to="/tournaments"
-              className="text-sm font-bold text-white/60 hover:text-cyan-400"
-            >
-              Tournaments
-            </Link>
-
-            <Link
-              to="/matches/1"
-              className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-cyan-400"
-            >
-              <Radio size={16} />
-              Match Room
-            </Link>
-
-            {userRole === "PLAYER" && (
-              <>
-                <Link
-                  to="/team"
-                  className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-cyan-400"
-                >
-                  <Users size={16} />
-                  Team
-                </Link>
-                <Link
-                  to="/become-organizer"
-                  className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-cyan-400"
-                >
-                  <UserCheck size={16} />
-                  Become Organizer
-                </Link>
-              </>
-            )}
-
-            {userRole === "ORGANIZER" && (
-              <Link
-                to="/organizer"
-                className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-cyan-400"
-              >
-                <Shield size={16} />
-                Organizer
-              </Link>
-            )}
-
-            {userRole === "ADMIN" && (
-              <>
-                <Link
-                  to="/admin"
-                  className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-cyan-400"
-                >
-                  <Sword size={16} />
-                  Admin
-                </Link>
-                <Link
-                  to="/admin/organizer-requests"
-                  className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-cyan-400"
-                >
-                  <UserCheck size={16} />
-                  Organizer Requests
-                </Link>
-                <Link
-                  to="/admin/tournament-approvals"
-                  className="flex items-center gap-2 text-sm font-bold text-white/60 hover:text-cyan-400"
-                >
-                  <ClipboardCheck size={16} />
-                  Tournament Approvals
-                </Link>
-              </>
-            )}
+          {/* Desktop nav */}
+          <div className="hidden items-center gap-1 lg:flex">
+            {navLinks}
           </div>
 
           <div className="relative flex items-center gap-3">
-            <button
+            <ModeToggle />
+
+            {/* Notification bell */}
+            <HeaderButton
               onClick={() => setOpen((prev) => !prev)}
-              className="relative rounded-2xl border border-white/10 bg-white/5 p-3 hover:bg-white/10"
+              ariaLabel="Open notifications"
+              className="relative size-11 px-0"
             >
-              <Bell size={18} />
+              <Bell className="size-5" />
 
               {unreadCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-red-500 text-xs font-black">
+                <motion.span
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-red-400 text-[11px] font-black text-black ring-2 ring-[#050816]"
+                >
                   {unreadCount}
-                </span>
+                </motion.span>
               )}
-            </button>
+            </HeaderButton>
 
-            {open && (
-              <div className="absolute right-0 top-14 z-50 w-80 rounded-3xl border border-white/10 bg-[#111827] p-4 shadow-2xl">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <h3 className="font-black">Notifications</h3>
+            <AnimatePresence>
+              {open && (
+                <motion.div
+                  initial={
+                    shouldReduceMotion
+                      ? false
+                      : { opacity: 0, y: 12, scale: 0.96, filter: "blur(8px)" }
+                  }
+                  animate={
+                    shouldReduceMotion
+                      ? undefined
+                      : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
+                  }
+                  exit={
+                    shouldReduceMotion
+                      ? undefined
+                      : { opacity: 0, y: 10, scale: 0.96, filter: "blur(8px)" }
+                  }
+                  transition={{
+                    duration: UI.motion.duration,
+                    ease: UI.motion.ease,
+                  }}
+                  className="absolute right-0 top-14 z-50 w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-[2rem] border border-white/10 bg-[#0f172a]/95 p-4 shadow-[0_32px_100px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+                >
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent" />
 
-                  {unreadCount > 0 && (
-                    <button
-                      onClick={handleReadAllNotifications}
-                      className="rounded-xl bg-white/10 px-3 py-1 text-xs font-bold text-white/70 hover:bg-white/15"
-                    >
-                      Mark all
-                    </button>
-                  )}
-                </div>
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-black tracking-[-0.03em]">
+                        Notifications
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {unreadCount} unread updates
+                      </p>
+                    </div>
 
-                {notifications.length === 0 ? (
-                  <EmptyState
-                    compact
-                    icon={Bell}
-                    title="No notifications"
-                    description="Invites and match updates will appear here."
-                  />
-                ) : (
-                  <div className="max-h-80 space-y-3 overflow-y-auto">
-                    {notifications.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`w-full rounded-2xl p-4 text-left transition ${
-                          item.isRead
-                            ? "bg-black/30 opacity-60"
-                            : "bg-cyan-400/10"
-                        }`}
-                      >
-                        <div
-                          onClick={() => handleReadNotification(item.id)}
-                          className="cursor-pointer"
+                    <div className="flex items-center gap-2">
+                      {unreadCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleReadAllNotifications}
+                          className="min-h-9 rounded-xl bg-white/[0.08] px-3 text-xs font-black text-slate-300 transition hover:bg-white/[0.12]"
                         >
-                          <p className="font-bold">{item.title}</p>
+                          Mark all
+                        </button>
+                      )}
 
-                          <p className="mt-1 text-sm text-white/60">
-                            {item.message}
-                          </p>
-
-                          <div className="mt-2 flex items-center justify-between gap-3 text-xs">
-                            <p className="text-cyan-400">{item.type}</p>
-
-                            <span
-                              className={`rounded-full px-2 py-1 font-bold ${
-                                item.isRead
-                                  ? "bg-white/10 text-white/50"
-                                  : "bg-emerald-400/15 text-emerald-300"
-                              }`}
-                            >
-                              {item.isRead ? "Đã đọc" : "Chưa đọc"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {item.type === "TEAM_INVITE" && !item.isRead && (
-                          <div className="mt-3 flex gap-2">
-                            <button
-                              onClick={() => handleAcceptInvite(item)}
-                              disabled={notificationActionId === item.id}
-                              className="flex items-center gap-2 rounded-xl bg-cyan-400 px-4 py-2 text-xs font-black text-black hover:bg-cyan-300 disabled:opacity-50"
-                            >
-                              {notificationActionId === item.id && (
-                                <Loader2 size={14} className="animate-spin" />
-                              )}
-                              Accept
-                            </button>
-
-                            <button
-                              onClick={() => handleRejectInvite(item)}
-                              disabled={notificationActionId === item.id}
-                              className="rounded-xl bg-red-400 px-4 py-2 text-xs font-black text-black hover:bg-red-300 disabled:opacity-50"
-                            >
-                              Reject
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      <button
+                        type="button"
+                        onClick={() => setOpen(false)}
+                        className="inline-flex size-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/10 hover:text-white"
+                        aria-label="Close notifications"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
+
+                  {notifications.length === 0 ? (
+                    <EmptyState
+                      compact
+                      icon={Bell}
+                      title="No notifications"
+                      description="Invites and match updates will appear here."
+                    />
+                  ) : (
+                    <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+                      {notifications.map((item) => (
+                        <NotificationItem
+                          key={item.id}
+                          item={item}
+                          actionId={notificationActionId}
+                          onRead={handleReadNotification}
+                          onAccept={handleAcceptInvite}
+                          onReject={handleRejectInvite}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {authenticated ? (
-              <button
-                onClick={handleLogout}
-                className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-2 text-sm font-bold hover:bg-white/10 md:flex"
-              >
-                <LogOut size={16} />
-                Logout
-              </button>
+              <>
+                <Link
+                  to="/profile"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl transition duration-200 hover:-translate-y-0.5 hover:bg-white/[0.1] md:px-4"
+                >
+                  <User className="size-4" />
+                  <span className="hidden sm:inline">Profile</span>
+                </Link>
+
+                <HeaderButton
+                  onClick={handleLogout}
+                  className="hidden gap-2 md:inline-flex"
+                >
+                  <LogOut className="size-4" />
+                  Logout
+                </HeaderButton>
+              </>
             ) : (
               <>
                 <Link
                   to="/login"
-                  className="hidden rounded-2xl border border-white/10 bg-white/5 px-5 py-2 text-sm font-bold hover:bg-white/10 md:block"
+                  className="hidden min-h-11 items-center rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-sm font-black text-white transition hover:bg-white/[0.1] md:inline-flex"
                 >
                   Login
                 </Link>
 
                 <Link
                   to="/register"
-                  className="flex items-center gap-2 rounded-2xl bg-cyan-400 px-5 py-2 font-bold text-black hover:bg-cyan-300"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 shadow-[0_18px_50px_rgba(34,211,238,0.22)] transition hover:-translate-y-0.5 hover:bg-cyan-200"
                 >
-                  <User size={16} />
+                  <User className="size-4" />
                   Join Arena
                 </Link>
               </>
             )}
+
+            {/* Mobile hamburger */}
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((prev) => !prev)}
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              className="inline-flex size-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white transition hover:bg-white/[0.1] lg:hidden"
+            >
+              <AnimatePresence mode="wait" initial={false}>
+                {mobileMenuOpen ? (
+                  <motion.span
+                    key="close"
+                    initial={{ rotate: -90, opacity: 0 }}
+                    animate={{ rotate: 0, opacity: 1 }}
+                    exit={{ rotate: 90, opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <X className="size-5" />
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="open"
+                    initial={{ rotate: 90, opacity: 0 }}
+                    animate={{ rotate: 0, opacity: 1 }}
+                    exit={{ rotate: -90, opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <Menu className="size-5" />
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </button>
           </div>
         </nav>
+
+        {/* Mobile menu dropdown */}
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <motion.div
+              initial={
+                shouldReduceMotion ? false : { opacity: 0, height: 0 }
+              }
+              animate={
+                shouldReduceMotion ? undefined : { opacity: 1, height: "auto" }
+              }
+              exit={
+                shouldReduceMotion ? undefined : { opacity: 0, height: 0 }
+              }
+              transition={{ duration: 0.22, ease: UI.motion.ease }}
+              className="overflow-hidden border-t border-white/10 bg-[#050816]/95 backdrop-blur-2xl lg:hidden"
+            >
+              <div className="mx-auto flex max-w-7xl flex-col gap-1 px-5 py-4 sm:px-6">
+                {navLinks}
+
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  {authenticated ? (
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="inline-flex min-h-10 w-full items-center gap-2 rounded-2xl px-3 text-sm font-black text-slate-400 transition hover:bg-white/[0.06] hover:text-red-300"
+                    >
+                      <LogOut className="size-4" />
+                      Logout
+                    </button>
+                  ) : (
+                    <Link
+                      to="/login"
+                      className="inline-flex min-h-10 w-full items-center gap-2 rounded-2xl px-3 text-sm font-black text-slate-400 transition hover:bg-white/[0.06] hover:text-cyan-200"
+                    >
+                      <User className="size-4" />
+                      Login
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
       <main className="relative z-0">
         <Outlet />
       </main>
 
-      <footer className="relative z-0 border-t border-white/10 px-6 py-10">
-        <div className="mx-auto flex max-w-7xl flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-2xl font-black">ArenaOS</h3>
-            <p className="mt-2 text-sm text-white/50">
-              Realtime Esports Tournament Operating System
-            </p>
+      {/* Enhanced footer */}
+      <footer className="relative z-0 border-t border-white/10 bg-[#050816]">
+        {/* Top gradient line */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/30 to-transparent" />
+
+        <div className="mx-auto max-w-7xl px-5 py-12 sm:px-6 lg:px-8">
+          <div className="grid gap-10 md:grid-cols-[1fr_auto]">
+            {/* Brand */}
+            <div>
+              <Link
+                to="/"
+                className="group inline-flex items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+              >
+                <span className="flex size-10 items-center justify-center rounded-xl bg-cyan-300 text-slate-950 shadow-[0_12px_35px_rgba(34,211,238,0.22)] transition duration-300 group-hover:shadow-[0_12px_45px_rgba(34,211,238,0.38)]">
+                  <Trophy className="size-5" />
+                </span>
+                <span className="text-xl font-black tracking-[-0.04em]">
+                  ArenaOS
+                </span>
+              </Link>
+              <p className="mt-3 max-w-xs text-sm leading-6 text-slate-500">
+                Realtime Esports Tournament Operating System. Built for
+                organizers, players, and spectators.
+              </p>
+
+              {/* Social links */}
+              <div className="mt-5 flex items-center gap-3">
+                <a
+                  href="#"
+                  aria-label="Twitter/X"
+                  className="inline-flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-500 transition hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
+                >
+                  <MessageCircle className="size-4" />
+                </a>
+                <a
+                  href="#"
+                  aria-label="GitHub"
+                  className="inline-flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-500 transition hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
+                >
+                  <Code2 className="size-4" />
+                </a>
+                <a
+                  href="#"
+                  aria-label="Discord"
+                  className="inline-flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-500 transition hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
+                >
+                  <Zap className="size-4" />
+                </a>
+              </div>
+            </div>
+
+            {/* Links */}
+            <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
+              <div>
+                <p className="mb-3 text-xs font-black uppercase tracking-[0.2em] text-slate-600">
+                  Platform
+                </p>
+                <ul className="space-y-2">
+                  {[
+                    { to: "/", label: "Home" },
+                    { to: "/tournaments", label: "Tournaments" },
+                    { to: "/matches/1", label: "Match Room" },
+                  ].map(({ to, label }) => (
+                    <li key={to}>
+                      <Link
+                        to={to}
+                        className="text-sm text-slate-500 transition hover:text-cyan-200"
+                      >
+                        {label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="mb-3 text-xs font-black uppercase tracking-[0.2em] text-slate-600">
+                  Account
+                </p>
+                <ul className="space-y-2">
+                  {[
+                    { to: "/login", label: "Login" },
+                    { to: "/register", label: "Register" },
+                    { to: "/profile", label: "Profile" },
+                  ].map(({ to, label }) => (
+                    <li key={to}>
+                      <Link
+                        to={to}
+                        className="text-sm text-slate-500 transition hover:text-cyan-200"
+                      >
+                        {label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="mb-3 text-xs font-black uppercase tracking-[0.2em] text-slate-600">
+                  Admin
+                </p>
+                <ul className="space-y-2">
+                  {[
+                    { to: "/organizer", label: "Organizer" },
+                    { to: "/admin", label: "Admin Panel" },
+                    { to: "/become-organizer", label: "Become Organizer" },
+                  ].map(({ to, label }) => (
+                    <li key={to}>
+                      <Link
+                        to={to}
+                        className="text-sm text-slate-500 transition hover:text-cyan-200"
+                      >
+                        {label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           </div>
 
-          <div className="flex gap-6 text-sm font-bold text-white/50">
-            <Link to="/" className="hover:text-cyan-400">
-              Home
-            </Link>
-            <Link to="/tournaments" className="hover:text-cyan-400">
-              Tournaments
-            </Link>
-            <Link to="/organizer" className="hover:text-cyan-400">
-              Organizer
-            </Link>
-            <Link to="/admin" className="hover:text-cyan-400">
-              Admin
-            </Link>
+          {/* Bottom bar */}
+          <div className="mt-10 flex flex-col gap-3 border-t border-white/[0.07] pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-slate-600">
+              © {new Date().getFullYear()} ArenaOS. All rights reserved.
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-55" />
+                <span className="relative inline-flex size-2 rounded-full bg-emerald-300" />
+              </span>
+              <span className="text-xs text-slate-600">Systems operational</span>
+            </div>
           </div>
         </div>
       </footer>

@@ -10,12 +10,15 @@ export type CreateTournamentPayload = {
   format: string;
   prizePool?: string;
   rules?: string;
+  region?: string;
+  livestreamUrl?: string;
   startDate: string;
   endDate?: string;
   registrationDeadline: string;
 };
 
 export type RegisterTeamPayload = {
+  teamId?: string;
   mainPlayerIds: string[];
   substituteIds?: string[];
 };
@@ -37,6 +40,21 @@ export type CreateAnnouncementPayload = {
   title: string;
   content: string;
   type: AnnouncementType;
+};
+
+export type AnnouncementDelivery = {
+  inAppRecipients: number;
+  discord: {
+    configured: boolean;
+    sent: boolean;
+    status?: number;
+    error?: string;
+  };
+};
+
+export type CreateAnnouncementResult = {
+  announcement: TournamentAnnouncement;
+  delivery: AnnouncementDelivery;
 };
 
 export type TournamentLeaderboardRow = {
@@ -91,7 +109,10 @@ export async function createTournamentAnnouncement(
   id: string,
   payload: CreateAnnouncementPayload,
 ) {
-  const res = await api.post(`/tournaments/${id}/announcements`, payload);
+  const res = await api.post<{
+    message: string;
+    data: CreateAnnouncementResult;
+  }>(`/tournaments/${id}/announcements`, payload);
   return res.data;
 }
 
@@ -114,7 +135,7 @@ export async function submitTournamentApproval(id: string) {
 }
 
 export async function closeTournamentRegistration(id: string) {
-  const res = await api.patch(`/tournaments/${id}/close-registration`);
+  const res = await api.post(`/tournaments/${id}/close-registration`);
   return res.data;
 }
 
@@ -124,9 +145,7 @@ export async function getTournamentRegistrations(id: string) {
 }
 
 export async function approveRegistration(registrationId: string) {
-  const res = await api.post(
-    `/tournaments/registrations/${registrationId}/approve`,
-  );
+  const res = await api.post(`/registrations/${registrationId}/approve`);
   return res.data;
 }
 
@@ -134,14 +153,13 @@ export async function rejectRegistration(
   registrationId: string,
   reason: string,
 ) {
-  const res = await api.post(
-    `/tournaments/registrations/${registrationId}/reject`,
-    { reason },
-  );
+  const res = await api.post(`/registrations/${registrationId}/reject`, {
+    reason,
+  });
   return res.data;
 }
 
 export async function generateBracket(id: string) {
-  const res = await api.post(`/tournaments/${id}/generate-bracket`);
+  const res = await api.post(`/tournaments/${id}/bracket/generate`);
   return res.data;
 }
