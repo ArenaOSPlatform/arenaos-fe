@@ -2,18 +2,22 @@ import { api } from "./api";
 
 export type CreateTeamPayload = {
   name: string;
+  game: string;
+  region: string;
   description?: string;
   logoUrl?: string;
 };
 
 export type UpdateTeamPayload = {
   name?: string;
+  game?: string;
+  region?: string;
   description?: string;
   logoUrl?: string;
 };
 
 export type InviteMemberPayload = {
-  email: string;
+  identifier: string;
 };
 
 export type TeamRankingHistory = {
@@ -134,7 +138,7 @@ export async function inviteTeamMember(
   teamId: string,
   payload: InviteMemberPayload,
 ) {
-  const res = await api.post(`/teams/${teamId}/invite`, payload);
+  const res = await api.post(`/teams/${teamId}/invites`, payload);
   return res.data;
 }
 
@@ -144,11 +148,11 @@ export async function getMyTeamInvites() {
 }
 
 export async function acceptTeamInvite(inviteId: string) {
-  const res = await api.post(`/teams/invites/${inviteId}/accept`);
+  const res = await api.post(`/team-invites/${inviteId}/accept`);
   return res.data;
 }
 
 export async function rejectTeamInvite(inviteId: string) {
-  const res = await api.post(`/teams/invites/${inviteId}/reject`);
+  const res = await api.post(`/team-invites/${inviteId}/reject`);
   return res.data;
 }

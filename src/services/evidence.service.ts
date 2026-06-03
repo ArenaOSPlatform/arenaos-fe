@@ -4,6 +4,8 @@ export async function submitMatchEvidence(
   matchId: string,
   payload: {
     imageUrl: string;
+    fileUrl?: string;
+    type?: string;
     note?: string;
   },
 ) {

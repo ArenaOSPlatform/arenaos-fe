@@ -1,10 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Link } from "react-router-dom";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Activity,
   CalendarDays,
   CheckCircle2,
   GitBranch,
+  ImagePlus,
   Loader2,
   Lock,
   Megaphone,
@@ -17,6 +26,7 @@ import {
   Trophy,
   Users,
   Video,
+  X,
 } from "lucide-react";
 import {
   approveRegistration,
@@ -25,25 +35,25 @@ import {
   createTournament,
   generateBracket,
   getMyTournaments,
+  getTournamentAnnouncements,
   getTournamentBracket,
   getTournamentRegistrations,
   rejectRegistration,
   submitTournamentApproval,
+  type AnnouncementDelivery,
   type AnnouncementType,
+  type TournamentAnnouncement,
 } from "@/services/tournament.service";
 import { scheduleMatch, updateMatchLivestream } from "@/services/match.service";
 import { getDisputes, resolveDispute } from "@/services/dispute.service";
 import { getAuditLogs } from "@/services/audit-log.service";
 import { uploadFile } from "@/services/upload.service";
-import {
-  EmptyState,
-  LoadingState,
-  Pagination,
-  getTotalPages,
-  paginateItems,
-  useConfirm,
-  useToast,
-} from "@/components/ui";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { Pagination } from "@/components/ui/Pagination";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useToast } from "@/hooks/useToast";
+import { getTotalPages, paginateItems } from "@/utils/paginationUtils";
 
 const organizerPageSize = 5;
 
@@ -60,7 +70,10 @@ function getApiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-function textMatches(values: Array<string | number | null | undefined>, query: string) {
+function textMatches(
+  values: Array<string | number | null | undefined>,
+  query: string,
+) {
   const normalizedQuery = query.trim().toLowerCase();
 
   if (!normalizedQuery) return true;
@@ -72,7 +85,10 @@ function textMatches(values: Array<string | number | null | undefined>, query: s
   );
 }
 
-function filterMatches(values: Array<string | null | undefined>, filter: string) {
+function filterMatches(
+  values: Array<string | null | undefined>,
+  filter: string,
+) {
   return filter === "ALL" || values.some((value) => value === filter);
 }
 
@@ -109,17 +125,142 @@ function isValidLivestreamUrl(value: string) {
   }
 }
 
-function pickImageFile() {
-  return new Promise<File | null>((resolve) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.addEventListener("change", () => resolve(input.files?.[0] ?? null), {
-      once: true,
-    });
-    input.addEventListener("cancel", () => resolve(null), { once: true });
-    input.click();
-  });
+type Tone = "cyan" | "emerald" | "amber" | "red" | "violet" | "slate";
+
+const toneClasses: Record<Tone, string> = {
+  cyan: "border-cyan-300/20 bg-cyan-300/10 text-cyan-100",
+  emerald: "border-emerald-300/20 bg-emerald-300/10 text-emerald-100",
+  amber: "border-amber-300/20 bg-amber-300/10 text-amber-100",
+  red: "border-red-300/20 bg-red-300/10 text-red-100",
+  violet: "border-violet-300/20 bg-violet-300/10 text-violet-100",
+  slate: "border-white/10 bg-white/[0.055] text-slate-200",
+};
+
+function getStatusTone(status: string): Tone {
+  if (["APPROVED", "OPEN_REGISTRATION", "READY", "COMPLETED"].includes(status)) {
+    return "emerald";
+  }
+
+  if (["PENDING", "PENDING_APPROVAL", "MATCH_SCHEDULED", "IN_PROGRESS"].includes(status)) {
+    return "amber";
+  }
+
+  if (["REJECTED", "DISPUTED", "OPEN", "CANCELLED"].includes(status)) {
+    return "red";
+  }
+
+  if (["BRACKET_GENERATED", "REGISTRATION_CLOSED", "LOCKED"].includes(status)) {
+    return "violet";
+  }
+
+  return "cyan";
+}
+
+function formatStatus(status: string) {
+  return status.replaceAll("_", " ");
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "Not scheduled";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not scheduled";
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function StatusPill({ value }: { value: string }) {
+  const tone = getStatusTone(value);
+
+  return (
+    <span
+      className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${toneClasses[tone]}`}
+    >
+      <span className="size-1.5 rounded-full bg-current" />
+      {formatStatus(value)}
+    </span>
+  );
+}
+
+function MetricCard({
+  icon,
+  label,
+  value,
+  helper,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: ReactNode;
+  helper?: ReactNode;
+  tone: Tone;
+}) {
+  return (
+    <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+            {label}
+          </p>
+          <p className="mt-3 text-4xl font-black leading-none text-white">
+            {value}
+          </p>
+          {helper && <p className="mt-2 text-sm text-slate-400">{helper}</p>}
+        </div>
+        <span
+          className={`inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border ${toneClasses[tone]}`}
+        >
+          {icon}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function PanelShell({
+  icon,
+  title,
+  description,
+  children,
+  className = "",
+}: {
+  icon: ReactNode;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={[
+        "overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] shadow-[0_24px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
+        className,
+      ].join(" ")}
+    >
+      <div className="border-b border-white/10 px-5 py-5 sm:px-6">
+        <div className="flex items-start gap-3">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100">
+            {icon}
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-2xl font-black text-white">{title}</h2>
+            {description && (
+              <p className="mt-1 text-sm leading-6 text-slate-400">
+                {description}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 sm:p-6">{children}</div>
+    </section>
+  );
 }
 
 type Tournament = {
@@ -155,12 +296,16 @@ type OrganizerMatch = {
   scheduledAt: string | null;
   roomCode: string | null;
   livestreamUrl: string | null;
+  bestOf: string | null;
+  note: string | null;
 };
 
 type MatchScheduleForm = {
   scheduledAt: string;
   roomCode: string;
   livestreamUrl: string;
+  bestOf: string;
+  note: string;
 };
 
 type LineupPlayer = {
@@ -217,6 +362,424 @@ type AuditLog = {
   createdAt: string;
 };
 
+type CreateTournamentForm = {
+  name: string;
+  game: string;
+  maxTeams: string;
+  teamSize: string;
+  format: string;
+  region: string;
+  description: string;
+  prizePool: string;
+  rules: string;
+  livestreamUrl: string;
+  startDate: string;
+  registrationDeadline: string;
+  bannerFile: File | null;
+};
+
+function getDefaultCreateTournamentForm(): CreateTournamentForm {
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+
+  return {
+    name: "",
+    game: "",
+    maxTeams: "4",
+    teamSize: "5",
+    format: "SINGLE_ELIMINATION",
+    region: "Global",
+    description: "",
+    prizePool: "",
+    rules: "",
+    livestreamUrl: "",
+    startDate: toDateTimeLocal(new Date(now + 7 * day).toISOString()),
+    registrationDeadline: toDateTimeLocal(
+      new Date(now + 3 * day).toISOString(),
+    ),
+    bannerFile: null,
+  };
+}
+
+const modalInputClass =
+  "mt-2 min-h-12 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm font-bold text-white outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10 disabled:cursor-not-allowed disabled:opacity-50";
+
+function FormField({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={`block ${className}`}>
+      <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function ModalShell({
+  title,
+  eyebrow,
+  icon,
+  children,
+  onClose,
+  maxWidth = "max-w-3xl",
+}: {
+  title: string;
+  eyebrow: string;
+  icon: ReactNode;
+  children: ReactNode;
+  onClose: () => void;
+  maxWidth?: string;
+}) {
+  const shouldReduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-[120] flex items-center justify-center px-4 py-6"
+      role="presentation"
+      initial={shouldReduceMotion ? false : { opacity: 0 }}
+      animate={shouldReduceMotion ? undefined : { opacity: 1 }}
+      exit={shouldReduceMotion ? undefined : { opacity: 0 }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <button
+        type="button"
+        aria-label="Close dialog"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/75 backdrop-blur-xl"
+      />
+
+      <motion.section
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        initial={
+          shouldReduceMotion
+            ? false
+            : { opacity: 0, y: 22, scale: 0.96, filter: "blur(10px)" }
+        }
+        animate={
+          shouldReduceMotion
+            ? undefined
+            : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
+        }
+        exit={
+          shouldReduceMotion
+            ? undefined
+            : { opacity: 0, y: 14, scale: 0.97, filter: "blur(8px)" }
+        }
+        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+        className={`relative max-h-[92vh] w-full overflow-hidden rounded-[2rem] border border-white/10 bg-[#0f172a]/95 shadow-[0_32px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl ${maxWidth}`}
+      >
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-cyan-200/70 to-transparent" />
+        <div className="pointer-events-none absolute -right-20 -top-20 size-64 rounded-full bg-cyan-300/10 blur-3xl" />
+
+        <div className="relative flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5 sm:px-6">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100">
+              {icon}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-200">
+                {eyebrow}
+              </p>
+              <h2 className="mt-1 text-2xl font-black tracking-[-0.03em] text-white">
+                {title}
+              </h2>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex size-10 shrink-0 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+            aria-label="Close dialog"
+          >
+            <X className="size-5" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="relative max-h-[calc(92vh-92px)] overflow-y-auto p-5 sm:p-6">
+          {children}
+        </div>
+      </motion.section>
+    </motion.div>
+  );
+}
+
+function CreateTournamentModal({
+  form,
+  loading,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  form: CreateTournamentForm;
+  loading: boolean;
+  onChange: (form: CreateTournamentForm) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  function update<K extends keyof CreateTournamentForm>(
+    field: K,
+    value: CreateTournamentForm[K],
+  ) {
+    onChange({ ...form, [field]: value });
+  }
+
+  return (
+    <ModalShell
+      title="Create Tournament"
+      eyebrow="New event"
+      icon={<Plus className="size-6" />}
+      onClose={onClose}
+      maxWidth="max-w-4xl"
+    >
+      <form onSubmit={onSubmit} className="space-y-5">
+        <div className="grid gap-4 md:grid-cols-2">
+          <FormField label="Tournament name">
+            <input
+              value={form.name}
+              onChange={(event) => update("name", event.target.value)}
+              className={modalInputClass}
+              placeholder="ArenaOS Invitational"
+              autoFocus
+            />
+          </FormField>
+
+          <FormField label="Game">
+            <input
+              value={form.game}
+              onChange={(event) => update("game", event.target.value)}
+              className={modalInputClass}
+              placeholder="Valorant"
+            />
+          </FormField>
+
+          <FormField label="Max teams">
+            <input
+              type="number"
+              min={2}
+              value={form.maxTeams}
+              onChange={(event) => update("maxTeams", event.target.value)}
+              className={modalInputClass}
+            />
+          </FormField>
+
+          <FormField label="Team size">
+            <input
+              type="number"
+              min={1}
+              value={form.teamSize}
+              onChange={(event) => update("teamSize", event.target.value)}
+              className={modalInputClass}
+            />
+          </FormField>
+
+          <FormField label="Format">
+            <select
+              value={form.format}
+              onChange={(event) => update("format", event.target.value)}
+              className={modalInputClass}
+            >
+              <option value="SINGLE_ELIMINATION">Single elimination</option>
+              <option value="DOUBLE_ELIMINATION">Double elimination</option>
+              <option value="ROUND_ROBIN">Round robin</option>
+            </select>
+          </FormField>
+
+          <FormField label="Region">
+            <input
+              value={form.region}
+              onChange={(event) => update("region", event.target.value)}
+              className={modalInputClass}
+              placeholder="Global"
+            />
+          </FormField>
+
+          <FormField label="Start date">
+            <input
+              type="datetime-local"
+              value={form.startDate}
+              onChange={(event) => update("startDate", event.target.value)}
+              className={modalInputClass}
+            />
+          </FormField>
+
+          <FormField label="Registration deadline">
+            <input
+              type="datetime-local"
+              value={form.registrationDeadline}
+              onChange={(event) =>
+                update("registrationDeadline", event.target.value)
+              }
+              className={modalInputClass}
+            />
+          </FormField>
+
+          <FormField label="Prize pool">
+            <input
+              value={form.prizePool}
+              onChange={(event) => update("prizePool", event.target.value)}
+              className={modalInputClass}
+              placeholder="$1,000"
+            />
+          </FormField>
+
+          <FormField label="Livestream">
+            <input
+              value={form.livestreamUrl}
+              onChange={(event) => update("livestreamUrl", event.target.value)}
+              className={modalInputClass}
+              placeholder="https://..."
+            />
+          </FormField>
+        </div>
+
+        <FormField label="Banner image">
+          <label className="mt-2 flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-2xl border border-dashed border-cyan-300/25 bg-cyan-300/[0.055] px-4 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-300/10">
+            <span className="flex min-w-0 items-center gap-3">
+              <ImagePlus className="size-5 shrink-0" aria-hidden="true" />
+              <span className="truncate">
+                {form.bannerFile?.name ?? "Select banner image"}
+              </span>
+            </span>
+            <span className="rounded-xl bg-cyan-300 px-3 py-1.5 text-xs text-slate-950">
+              Browse
+            </span>
+            <input
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(event) =>
+                update("bannerFile", event.target.files?.[0] ?? null)
+              }
+            />
+          </label>
+        </FormField>
+
+        <FormField label="Description">
+          <textarea
+            value={form.description}
+            onChange={(event) => update("description", event.target.value)}
+            className={`${modalInputClass} min-h-24 resize-none font-medium leading-6`}
+            placeholder="Tournament overview"
+          />
+        </FormField>
+
+        <FormField label="Rules">
+          <textarea
+            value={form.rules}
+            onChange={(event) => update("rules", event.target.value)}
+            className={`${modalInputClass} min-h-24 resize-none font-medium leading-6`}
+            placeholder="Match rules, check-in policy, dispute policy"
+          />
+        </FormField>
+
+        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-sm font-black text-slate-200 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 shadow-[0_18px_55px_rgba(103,232,249,0.2)] transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+          >
+            {loading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Plus className="size-4" />
+            )}
+            Create Tournament
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function RejectRegistrationModal({
+  teamName,
+  reason,
+  loading,
+  onReasonChange,
+  onClose,
+  onSubmit,
+}: {
+  teamName: string;
+  reason: string;
+  loading: boolean;
+  onReasonChange: (reason: string) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <ModalShell
+      title="Reject Registration"
+      eyebrow={teamName}
+      icon={<ShieldAlert className="size-6" />}
+      onClose={onClose}
+      maxWidth="max-w-xl"
+    >
+      <form onSubmit={onSubmit} className="space-y-5">
+        <FormField label="Reason">
+          <textarea
+            value={reason}
+            onChange={(event) => onReasonChange(event.target.value)}
+            className={`${modalInputClass} min-h-32 resize-none font-medium leading-6 focus:border-red-300/60 focus:ring-red-300/10`}
+            placeholder="Lineup invalid, missing info, or other review note"
+            autoFocus
+          />
+        </FormField>
+
+        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-sm font-black text-slate-200 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-red-300 px-5 text-sm font-black text-slate-950 shadow-[0_18px_55px_rgba(252,165,165,0.2)] transition hover:-translate-y-0.5 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+          >
+            {loading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <ShieldAlert className="size-4" />
+            )}
+            Reject Registration
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
 export function OrganizerDashboardPage() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -225,12 +788,19 @@ export function OrganizerDashboardPage() {
     useState<Tournament | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [matches, setMatches] = useState<OrganizerMatch[]>([]);
+  const [bracketStatus, setBracketStatus] = useState<string | null>(null);
   const [scheduleForms, setScheduleForms] = useState<
     Record<string, MatchScheduleForm>
   >({});
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [loadingPage, setLoadingPage] = useState(true);
   const [loadingAction, setLoadingAction] = useState(false);
+  const [createTournamentOpen, setCreateTournamentOpen] = useState(false);
+  const [createTournamentForm, setCreateTournamentForm] =
+    useState<CreateTournamentForm>(() => getDefaultCreateTournamentForm());
+  const [rejectRegistrationTarget, setRejectRegistrationTarget] =
+    useState<Registration | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
   const [schedulingMatchId, setSchedulingMatchId] = useState<string | null>(
     null,
   );
@@ -242,12 +812,18 @@ export function OrganizerDashboardPage() {
   const [announcementContent, setAnnouncementContent] = useState("");
   const [announcementType, setAnnouncementType] =
     useState<AnnouncementType>("INFO");
+  const [announcements, setAnnouncements] = useState<TournamentAnnouncement[]>(
+    [],
+  );
+  const [announcementDelivery, setAnnouncementDelivery] =
+    useState<AnnouncementDelivery | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [tournamentQuery, setTournamentQuery] = useState("");
   const [tournamentStatusFilter, setTournamentStatusFilter] = useState("ALL");
   const [tournamentPage, setTournamentPage] = useState(1);
   const [registrationQuery, setRegistrationQuery] = useState("");
-  const [registrationStatusFilter, setRegistrationStatusFilter] = useState("ALL");
+  const [registrationStatusFilter, setRegistrationStatusFilter] =
+    useState("ALL");
   const [registrationPage, setRegistrationPage] = useState(1);
   const [matchQuery, setMatchQuery] = useState("");
   const [matchStatusFilter, setMatchStatusFilter] = useState("ALL");
@@ -256,34 +832,18 @@ export function OrganizerDashboardPage() {
   const [disputeStatusFilter, setDisputeStatusFilter] = useState("ALL");
   const [disputePage, setDisputePage] = useState(1);
 
-  async function loadTournaments(keepSelectedId?: string) {
-    const res = await getMyTournaments();
-    const list = res.data as Tournament[];
-
-    setTournaments(list);
-
-    const nextSelected =
-      list.find((item) => item.id === keepSelectedId) ?? list[0] ?? null;
-
-    setSelectedTournament(nextSelected);
-
-    if (nextSelected) {
-      await loadRegistrations(nextSelected.id);
-      await loadMatches(nextSelected.id);
-    }
-  }
-
-  async function loadRegistrations(tournamentId: string) {
+  const loadRegistrations = useCallback(async (tournamentId: string) => {
     const res = await getTournamentRegistrations(tournamentId);
     setRegistrations(res.data);
-  }
+  }, []);
 
-  async function loadMatches(tournamentId: string) {
+  const loadMatches = useCallback(async (tournamentId: string) => {
     try {
       const res = await getTournamentBracket(tournamentId);
       const list = res.data.matches as OrganizerMatch[];
 
       setMatches(list);
+      setBracketStatus(typeof res.data.status === "string" ? res.data.status : null);
       setScheduleForms(() => {
         const next: Record<string, MatchScheduleForm> = {};
 
@@ -292,6 +852,8 @@ export function OrganizerDashboardPage() {
             scheduledAt: toDateTimeLocal(match.scheduledAt),
             roomCode: match.roomCode ?? "",
             livestreamUrl: match.livestreamUrl ?? "",
+            bestOf: match.bestOf ?? "BO1",
+            note: match.note ?? "",
           };
         });
 
@@ -299,14 +861,51 @@ export function OrganizerDashboardPage() {
       });
     } catch {
       setMatches([]);
+      setBracketStatus(null);
       setScheduleForms({});
     }
-  }
+  }, []);
 
-  async function loadDisputes() {
+  const loadAnnouncements = useCallback(async (tournamentId: string) => {
+    const res = await getTournamentAnnouncements(tournamentId);
+    setAnnouncements(res.data);
+    setAnnouncementDelivery(null);
+  }, []);
+
+  const loadDisputes = useCallback(async () => {
     const res = await getDisputes();
     setDisputes(res.data);
-  }
+  }, []);
+
+  const loadAuditLogs = useCallback(async () => {
+    const res = await getAuditLogs();
+    setAuditLogs(res.data);
+  }, []);
+
+  const loadTournaments = useCallback(
+    async (keepSelectedId?: string) => {
+      const res = await getMyTournaments();
+      const list = res.data as Tournament[];
+
+      setTournaments(list);
+
+      const nextSelected =
+        list.find((item) => item.id === keepSelectedId) ?? list[0] ?? null;
+
+      setSelectedTournament(nextSelected);
+
+      if (nextSelected) {
+        await loadRegistrations(nextSelected.id);
+        await loadMatches(nextSelected.id);
+        await loadAnnouncements(nextSelected.id);
+      } else {
+        setRegistrations([]);
+        setMatches([]);
+        setAnnouncements([]);
+      }
+    },
+    [loadAnnouncements, loadMatches, loadRegistrations],
+  );
 
   async function handleSelectTournament(tournament: Tournament) {
     setSelectedTournament(tournament);
@@ -314,6 +913,7 @@ export function OrganizerDashboardPage() {
     try {
       await loadRegistrations(tournament.id);
       await loadMatches(tournament.id);
+      await loadAnnouncements(tournament.id);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Failed to load registrations."));
     }
@@ -327,7 +927,9 @@ export function OrganizerDashboardPage() {
       return;
     }
 
-    const registration = registrations.find((item) => item.id === registrationId);
+    const registration = registrations.find(
+      (item) => item.id === registrationId,
+    );
     const confirmed = await confirm({
       title: "Approve registration?",
       description: `${registration?.team.name ?? "This team"} will be added to ${selectedTournament.name}.`,
@@ -357,7 +959,7 @@ export function OrganizerDashboardPage() {
     }
   }
 
-  async function handleReject(registrationId: string) {
+  function handleReject(registrationId: string) {
     if (!selectedTournament) return;
 
     if (selectedTournament.status === "COMPLETED") {
@@ -365,25 +967,34 @@ export function OrganizerDashboardPage() {
       return;
     }
 
-    const reason = prompt("Reject reason") ?? "";
+    const registration = registrations.find(
+      (item) => item.id === registrationId,
+    );
 
-    const registration = registrations.find((item) => item.id === registrationId);
-    const confirmed = await confirm({
-      title: "Reject registration?",
-      description: `${registration?.team.name ?? "This team"} will be removed from the pending queue.`,
-      confirmText: "Reject",
-      tone: "danger",
-    });
+    if (!registration) {
+      toast.error("Registration not found.");
+      return;
+    }
 
-    if (!confirmed) return;
+    setRejectReason("");
+    setRejectRegistrationTarget(registration);
+  }
+
+  async function handleRejectRegistrationSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!selectedTournament || !rejectRegistrationTarget) return;
 
     try {
       setLoadingAction(true);
 
-      await rejectRegistration(registrationId, reason);
+      await rejectRegistration(rejectRegistrationTarget.id, rejectReason.trim());
       await loadRegistrations(selectedTournament.id);
 
       toast.success("Registration rejected successfully");
+      setRejectRegistrationTarget(null);
+      setRejectReason("");
       await loadAuditLogs();
     } catch (err) {
       toast.error(
@@ -397,27 +1008,79 @@ export function OrganizerDashboardPage() {
     }
   }
 
-  async function handleCreateTournament() {
-    const name = prompt("Tournament name");
-    const game = prompt("Game");
+  function handleCreateTournament() {
+    setCreateTournamentForm(getDefaultCreateTournamentForm());
+    setCreateTournamentOpen(true);
+  }
 
-    if (!name || !game) return;
+  async function handleCreateTournamentSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
 
-    const maxTeams = Number(prompt("Max teams", "4"));
-    const teamSize = Number(prompt("Team size", "5"));
-    const format = prompt("Format", "SINGLE_ELIMINATION") ?? "";
-    const startDate =
-      prompt("Start date ISO", new Date().toISOString()) ??
-      new Date().toISOString();
-    const registrationDeadline =
-      prompt("Registration deadline ISO", new Date().toISOString()) ??
-      new Date().toISOString();
-    const bannerFile = await pickImageFile();
+    const name = createTournamentForm.name.trim();
+    const game = createTournamentForm.game.trim();
+    const format = createTournamentForm.format.trim();
+    const maxTeams = Number(createTournamentForm.maxTeams);
+    const teamSize = Number(createTournamentForm.teamSize);
+    const startDate = new Date(createTournamentForm.startDate);
+    const registrationDeadline = new Date(
+      createTournamentForm.registrationDeadline,
+    );
+    const livestreamUrl = createTournamentForm.livestreamUrl.trim();
+
+    if (!name || !game) {
+      toast.warning("Tournament name and game are required.");
+      return;
+    }
+
+    if (!Number.isInteger(maxTeams) || maxTeams < 2) {
+      toast.warning("Max teams must be at least 2.");
+      return;
+    }
+
+    if (!Number.isInteger(teamSize) || teamSize < 1) {
+      toast.warning("Team size must be at least 1.");
+      return;
+    }
+
+    if (!format) {
+      toast.warning("Tournament format is required.");
+      return;
+    }
+
+    if (
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(registrationDeadline.getTime())
+    ) {
+      toast.warning("Choose valid dates before creating the tournament.");
+      return;
+    }
+
+    if (!isFutureDate(startDate)) {
+      toast.warning("Start date must be in the future.");
+      return;
+    }
+
+    if (!isFutureDate(registrationDeadline)) {
+      toast.warning("Registration deadline must be in the future.");
+      return;
+    }
+
+    if (registrationDeadline.getTime() >= startDate.getTime()) {
+      toast.warning("Registration deadline must be before start date.");
+      return;
+    }
+
+    if (livestreamUrl && !isValidLivestreamUrl(livestreamUrl)) {
+      toast.warning("Livestream link must be a valid http or https URL.");
+      return;
+    }
 
     try {
       setLoadingAction(true);
-      const bannerUrl = bannerFile
-        ? (await uploadFile(bannerFile)).data.url
+      const bannerUrl = createTournamentForm.bannerFile
+        ? (await uploadFile(createTournamentForm.bannerFile)).data.url
         : undefined;
 
       const res = await createTournament({
@@ -427,11 +1090,18 @@ export function OrganizerDashboardPage() {
         maxTeams,
         teamSize,
         format,
-        startDate,
-        registrationDeadline,
+        region: createTournamentForm.region.trim() || undefined,
+        description: createTournamentForm.description.trim() || undefined,
+        prizePool: createTournamentForm.prizePool.trim() || undefined,
+        rules: createTournamentForm.rules.trim() || undefined,
+        livestreamUrl: livestreamUrl || undefined,
+        startDate: startDate.toISOString(),
+        registrationDeadline: registrationDeadline.toISOString(),
       });
 
       toast.success(res.message);
+      setCreateTournamentOpen(false);
+      setCreateTournamentForm(getDefaultCreateTournamentForm());
       await loadTournaments(res.data.id);
       await loadAuditLogs();
     } catch (err) {
@@ -517,6 +1187,8 @@ export function OrganizerDashboardPage() {
         scheduledAt: prev[matchId]?.scheduledAt ?? "",
         roomCode: prev[matchId]?.roomCode ?? "",
         livestreamUrl: prev[matchId]?.livestreamUrl ?? "",
+        bestOf: prev[matchId]?.bestOf ?? "BO1",
+        note: prev[matchId]?.note ?? "",
         [field]: value,
       },
     }));
@@ -574,6 +1246,8 @@ export function OrganizerDashboardPage() {
         scheduledAt: scheduledAt.toISOString(),
         roomCode: form.roomCode.trim(),
         livestreamUrl: form.livestreamUrl.trim() || undefined,
+        bestOf: form.bestOf,
+        note: form.note.trim() || undefined,
       });
 
       toast.success(res.message);
@@ -654,7 +1328,9 @@ export function OrganizerDashboardPage() {
       await loadTournaments(selectedTournament.id);
       await loadAuditLogs();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "Submit tournament approval failed."));
+      toast.error(
+        getApiErrorMessage(err, "Submit tournament approval failed."),
+      );
     } finally {
       setLoadingAction(false);
     }
@@ -678,7 +1354,7 @@ export function OrganizerDashboardPage() {
 
     const confirmed = await confirm({
       title: "Create announcement?",
-      description: `Send a ${announcementType} announcement to registered teams in ${selectedTournament.name}.`,
+      description: `Publish a ${announcementType} announcement for ${selectedTournament.name}. Discord will receive it, and registered team members will get in-app notifications when available.`,
       confirmText: "Create",
       tone: announcementType === "URGENT" ? "danger" : "info",
     });
@@ -694,7 +1370,26 @@ export function OrganizerDashboardPage() {
         type: announcementType,
       });
 
-      toast.success(res.message);
+      const { announcement, delivery } = res.data;
+      const discordLabel = !delivery.discord.configured
+        ? "Discord not configured"
+        : delivery.discord.sent
+          ? "Discord sent"
+          : "Discord failed";
+      const memberLabel = `${delivery.inAppRecipients} member${delivery.inAppRecipients === 1 ? "" : "s"} notified`;
+      const deliveryMessage = `${discordLabel} · ${memberLabel}`;
+
+      if (delivery.discord.configured && !delivery.discord.sent) {
+        toast.warning(deliveryMessage, res.message);
+      } else {
+        toast.success(deliveryMessage, res.message);
+      }
+
+      setAnnouncements((prev) => [
+        announcement,
+        ...prev.filter((item) => item.id !== announcement.id),
+      ]);
+      setAnnouncementDelivery(delivery);
       setAnnouncementTitle("");
       setAnnouncementContent("");
       setAnnouncementType("INFO");
@@ -740,11 +1435,6 @@ export function OrganizerDashboardPage() {
     }
   }
 
-  async function loadAuditLogs() {
-    const res = await getAuditLogs();
-    setAuditLogs(res.data);
-  }
-
   useEffect(() => {
     let cancelled = false;
 
@@ -755,7 +1445,9 @@ export function OrganizerDashboardPage() {
         await loadAuditLogs();
       } catch (err) {
         if (!cancelled) {
-          toast.error(getApiErrorMessage(err, "Failed to load organizer dashboard."));
+          toast.error(
+            getApiErrorMessage(err, "Failed to load organizer dashboard."),
+          );
         }
       } finally {
         if (!cancelled) {
@@ -769,7 +1461,7 @@ export function OrganizerDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [toast]);
+  }, [loadAuditLogs, loadDisputes, loadTournaments, toast]);
 
   function handleTournamentQueryChange(value: string) {
     setTournamentQuery(value);
@@ -844,8 +1536,10 @@ export function OrganizerDashboardPage() {
     () =>
       tournaments.filter(
         (item) =>
-          textMatches([item.name, item.status, item.maxTeams], tournamentQuery) &&
-          filterMatches([item.status], tournamentStatusFilter),
+          textMatches(
+            [item.name, item.status, item.maxTeams],
+            tournamentQuery,
+          ) && filterMatches([item.status], tournamentStatusFilter),
       ),
     [tournamentQuery, tournamentStatusFilter, tournaments],
   );
@@ -870,6 +1564,15 @@ export function OrganizerDashboardPage() {
       }),
     [registrationQuery, registrationStatusFilter, registrations],
   );
+  const matchTeamNameById = useMemo(
+    () => new Map(registrations.map((item) => [item.team.id, item.team.name])),
+    [registrations],
+  );
+  const getMatchTeamLabel = useCallback(
+    (teamId: string | null) =>
+      teamId ? (matchTeamNameById.get(teamId) ?? teamId) : "TBD",
+    [matchTeamNameById],
+  );
   const filteredMatches = useMemo(
     () =>
       matches.filter(
@@ -880,6 +1583,8 @@ export function OrganizerDashboardPage() {
               item.matchNumber,
               item.teamAId,
               item.teamBId,
+              getMatchTeamLabel(item.teamAId),
+              getMatchTeamLabel(item.teamBId),
               item.status,
               item.roomCode,
               item.livestreamUrl,
@@ -887,7 +1592,7 @@ export function OrganizerDashboardPage() {
             matchQuery,
           ) && filterMatches([item.status], matchStatusFilter),
       ),
-    [matchQuery, matchStatusFilter, matches],
+    [getMatchTeamLabel, matchQuery, matchStatusFilter, matches],
   );
   const filteredDisputes = useMemo(
     () =>
@@ -944,72 +1649,119 @@ export function OrganizerDashboardPage() {
   );
 
   return (
-    <div className="min-h-screen bg-[#0B1020] px-6 py-16">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-10 flex flex-col justify-between gap-6 md:flex-row md:items-end">
-          <div>
-            <p className="text-sm font-bold tracking-[0.3em] text-cyan-400">
-              ORGANIZER DASHBOARD
-            </p>
-            <h1 className="mt-4 text-5xl font-black">
+    <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(180deg,#050816_0%,#08111f_46%,#050816_100%)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:64px_64px] opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent_88%)]" />
+
+      <div className="mx-auto max-w-7xl space-y-6">
+        <header className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="rounded-[2rem] border border-white/10 bg-white/[0.055] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.32)] backdrop-blur-2xl sm:p-8">
+            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.22em] text-cyan-100">
+              <Trophy className="size-4" aria-hidden="true" />
+              Organizer Dashboard
+            </span>
+
+            <h1 className="mt-7 max-w-4xl text-4xl font-black leading-[0.95] text-white sm:text-5xl lg:text-6xl">
               Tournament Control Center
             </h1>
-            <p className="mt-4 text-white/60">
-              Manage registrations, approve teams, generate brackets and resolve
-              match disputes.
+            <p className="mt-5 max-w-3xl text-base leading-8 text-slate-300">
+              Manage registrations, approvals, brackets, match scheduling,
+              livestreams, announcements and disputes from one operator surface.
             </p>
-          </div>
 
-          <button
-            onClick={handleCreateTournament}
-            disabled={loadingAction}
-            className="flex w-fit items-center gap-2 rounded-2xl bg-cyan-400 px-5 py-3 font-bold text-black hover:bg-cyan-300 disabled:opacity-50"
-          >
-            {loadingAction ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <Plus size={18} />
-            )}
-            Create Tournament
-          </button>
-        </div>
+            <div className="mt-7 flex flex-wrap gap-3 text-sm font-bold text-slate-300">
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-4 py-2">
+                <GitBranch className="size-4 text-cyan-200" />
+                Bracket engine
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-4 py-2">
+                <Radio className="size-4 text-red-200" />
+                Live operations
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-4 py-2">
+                <Activity className="size-4 text-violet-200" />
+                Audit trail
+              </span>
+            </div>
+          </section>
 
-        <section className="grid gap-6 md:grid-cols-5">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-            <Trophy className="mb-4 text-yellow-300" />
-            <p className="text-sm text-white/50">Tournaments</p>
-            <p className="mt-2 text-3xl font-black">{tournaments.length}</p>
-          </div>
+          <section className="rounded-[2rem] border border-white/10 bg-[#09111f]/85 p-5 shadow-[0_24px_100px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+              Selected event
+            </p>
+            <h2 className="mt-3 line-clamp-2 text-2xl font-black text-white">
+              {selectedTournament?.name ?? "No tournament selected"}
+            </h2>
+            <div className="mt-4">
+              {selectedTournament ? (
+                <StatusPill value={selectedTournament.status} />
+              ) : (
+                <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${toneClasses.slate}`}>
+                  Select one
+                </span>
+              )}
+            </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-            <Users className="mb-4 text-cyan-400" />
-            <p className="text-sm text-white/50">Registrations</p>
-            <p className="mt-2 text-3xl font-black">{registrations.length}</p>
-          </div>
+            <button
+              type="button"
+              onClick={handleCreateTournament}
+              disabled={loadingAction}
+              className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 shadow-[0_18px_55px_rgba(103,232,249,0.18)] transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+            >
+              {loadingAction ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+              Create Tournament
+            </button>
+          </section>
+        </header>
 
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-            <CheckCircle2 className="mb-4 text-green-400" />
-            <p className="text-sm text-white/50">Approved</p>
-            <p className="mt-2 text-3xl font-black">{approvedCount}</p>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-            <ShieldAlert className="mb-4 text-violet-400" />
-            <p className="text-sm text-white/50">Pending</p>
-            <p className="mt-2 text-3xl font-black">{pendingCount}</p>
-          </div>
-
-          <div className="rounded-3xl border border-red-400/20 bg-red-400/10 p-6">
-            <ShieldAlert className="mb-4 text-red-400" />
-            <p className="text-sm text-white/50">Open Disputes</p>
-            <p className="mt-2 text-3xl font-black">{openDisputesCount}</p>
-          </div>
+        <section className="grid gap-4 md:grid-cols-5">
+          <MetricCard
+            icon={<Trophy className="size-5" />}
+            label="Tournaments"
+            value={tournaments.length}
+            helper="managed events"
+            tone="amber"
+          />
+          <MetricCard
+            icon={<Users className="size-5" />}
+            label="Registrations"
+            value={registrations.length}
+            helper={`${pendingCount} pending`}
+            tone="cyan"
+          />
+          <MetricCard
+            icon={<CheckCircle2 className="size-5" />}
+            label="Approved"
+            value={approvedCount}
+            helper="accepted teams"
+            tone="emerald"
+          />
+          <MetricCard
+            icon={<ShieldAlert className="size-5" />}
+            label="Pending"
+            value={pendingCount}
+            helper="needs review"
+            tone="violet"
+          />
+          <MetricCard
+            icon={<ShieldAlert className="size-5" />}
+            label="Open Disputes"
+            value={openDisputesCount}
+            helper="match reports"
+            tone="red"
+          />
         </section>
 
-        <section className="mt-8 grid gap-8 lg:grid-cols-[0.8fr_1.2fr]">
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-            <h2 className="mb-6 text-2xl font-black">My Tournaments</h2>
-
+        <section className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
+          <PanelShell
+            icon={<Trophy className="size-6" />}
+            title="My Tournaments"
+            description="Search, filter and switch between events without leaving the operator desk."
+          >
             <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_180px]">
               <label className="relative block">
                 <Search
@@ -1021,7 +1773,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleTournamentQueryChange(event.target.value)
                   }
-                  className="w-full rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm outline-none placeholder:text-white/35 focus:border-cyan-400/50"
+                  className="w-full rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                   placeholder="Search tournaments"
                 />
               </label>
@@ -1036,7 +1788,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleTournamentStatusFilterChange(event.target.value)
                   }
-                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm font-bold outline-none focus:border-cyan-400/50"
+                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm font-bold outline-none transition focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                 >
                   <option value="ALL">All</option>
                   {tournamentStatusOptions.map((status) => (
@@ -1078,18 +1830,21 @@ export function OrganizerDashboardPage() {
                     <button
                       key={item.id}
                       onClick={() => handleSelectTournament(item)}
-                      className={`w-full rounded-3xl p-5 text-left transition ${
+                      className={`w-full rounded-[1.35rem] border p-5 text-left shadow-[0_18px_70px_rgba(0,0,0,0.16)] transition duration-200 hover:-translate-y-0.5 ${
                         selectedTournament?.id === item.id
-                          ? "border border-cyan-400/50 bg-cyan-400/10"
-                          : "bg-black/30 hover:bg-white/[0.06]"
+                          ? "border-cyan-300/45 bg-cyan-300/10 shadow-[0_18px_70px_rgba(34,211,238,0.13)]"
+                          : "border-white/10 bg-black/25 hover:border-white/20 hover:bg-white/[0.055]"
                       }`}
                     >
-                      <p className="font-black">{item.name}</p>
-                      <p className="mt-1 text-sm text-white/50">
-                        Status: {item.status}
-                      </p>
-                      <p className="mt-1 text-sm text-white/50">
-                        Max Teams: {item.maxTeams}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <p className="min-w-0 text-lg font-black leading-6 text-white">
+                          {item.name}
+                        </p>
+                        <StatusPill value={item.status} />
+                      </div>
+                      <p className="mt-4 text-sm font-semibold text-slate-400">
+                        Max Teams:{" "}
+                        <span className="text-slate-100">{item.maxTeams}</span>
                       </p>
                       {item.approvalRejectReason && (
                         <p className="mt-3 rounded-2xl bg-red-400/10 p-3 text-sm text-red-300">
@@ -1108,17 +1863,29 @@ export function OrganizerDashboardPage() {
                 </>
               )}
             </div>
-          </div>
+          </PanelShell>
 
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
+          <PanelShell
+            icon={<Users className="size-6" />}
+            title={selectedTournament?.name ?? "No tournament selected"}
+            description="Registration Management"
+          >
             <div className="mb-6 flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
               <div>
-                <h2 className="text-2xl font-black">
-                  {selectedTournament?.name ?? "No tournament selected"}
-                </h2>
-                <p className="mt-1 text-sm text-white/50">
-                  Registration Management
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                  Current queue
                 </p>
+                <div className="mt-2">
+                  {selectedTournament ? (
+                    <StatusPill value={selectedTournament.status} />
+                  ) : (
+                    <span
+                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${toneClasses.slate}`}
+                    >
+                      Waiting for selection
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -1191,7 +1958,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleRegistrationQueryChange(event.target.value)
                   }
-                  className="w-full rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm outline-none placeholder:text-white/35 focus:border-cyan-400/50"
+                  className="w-full rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                   placeholder="Search registrations"
                 />
               </label>
@@ -1206,7 +1973,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleRegistrationStatusFilterChange(event.target.value)
                   }
-                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm font-bold outline-none focus:border-cyan-400/50"
+                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm font-bold outline-none transition focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                 >
                   <option value="ALL">All</option>
                   {registrationStatusOptions.map((status) => (
@@ -1253,10 +2020,12 @@ export function OrganizerDashboardPage() {
                   return (
                     <div
                       key={item.id}
-                      className="grid gap-4 rounded-3xl bg-black/30 p-5 md:grid-cols-[1fr_130px_120px]"
+                      className="grid gap-4 rounded-[1.35rem] border border-white/10 bg-black/25 p-5 shadow-[0_18px_70px_rgba(0,0,0,0.16)] md:grid-cols-[1fr_140px_130px]"
                     >
                       <div>
-                        <p className="font-black">{item.team.name}</p>
+                        <p className="text-lg font-black text-white">
+                          {item.team.name}
+                        </p>
                         <p className="text-sm text-white/50">
                           Captain: {item.team.captain.username}
                         </p>
@@ -1310,8 +2079,10 @@ export function OrganizerDashboardPage() {
                       </div>
 
                       <div>
-                        <p className="text-sm text-white/50">Status</p>
-                        <p className="font-bold text-cyan-300">{item.status}</p>
+                        <p className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                          Status
+                        </p>
+                        <StatusPill value={item.status} />
                       </div>
 
                       <div className="flex items-center">
@@ -1324,7 +2095,7 @@ export function OrganizerDashboardPage() {
                                 !lineup ||
                                 isSelectedTournamentArchived
                               }
-                              className="rounded-2xl bg-green-400 px-4 py-2 text-sm font-black text-black hover:bg-green-300 disabled:opacity-50"
+                              className="rounded-2xl bg-emerald-300 px-4 py-2 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-emerald-200 disabled:opacity-50 disabled:hover:translate-y-0"
                             >
                               Approve
                             </button>
@@ -1334,7 +2105,7 @@ export function OrganizerDashboardPage() {
                               disabled={
                                 loadingAction || isSelectedTournamentArchived
                               }
-                              className="rounded-2xl bg-red-400 px-4 py-2 text-sm font-black text-black hover:bg-red-300 disabled:opacity-50"
+                              className="rounded-2xl bg-red-300 px-4 py-2 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-red-200 disabled:opacity-50 disabled:hover:translate-y-0"
                             >
                               Reject
                             </button>
@@ -1356,21 +2127,20 @@ export function OrganizerDashboardPage() {
                 />
               </div>
             )}
-          </div>
+          </PanelShell>
         </section>
 
-        <section className="mt-8 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-          <div className="mb-6 flex items-center gap-3">
-            <Megaphone className="text-cyan-300" />
-            <h2 className="text-2xl font-black">Announcements</h2>
-          </div>
-
+        <PanelShell
+          icon={<Megaphone className="size-6" />}
+          title="Announcements"
+          description="Publish updates to Discord and notify registered team members when available."
+        >
           <div className="grid gap-4 xl:grid-cols-[1fr_180px]">
             <input
               value={announcementTitle}
               onChange={(event) => setAnnouncementTitle(event.target.value)}
               disabled={isSelectedTournamentArchived}
-              className="rounded-2xl border border-white/10 bg-[#0B1020] px-4 py-3 outline-none"
+              className="rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10 disabled:opacity-50"
               placeholder="Announcement title"
             />
 
@@ -1380,7 +2150,7 @@ export function OrganizerDashboardPage() {
                 setAnnouncementType(event.target.value as AnnouncementType)
               }
               disabled={isSelectedTournamentArchived}
-              className="rounded-2xl border border-white/10 bg-[#0B1020] px-4 py-3 font-bold outline-none"
+              className="rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 font-bold outline-none transition focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10 disabled:opacity-50"
             >
               <option value="INFO">INFO</option>
               <option value="WARNING">WARNING</option>
@@ -1392,7 +2162,7 @@ export function OrganizerDashboardPage() {
             value={announcementContent}
             onChange={(event) => setAnnouncementContent(event.target.value)}
             disabled={isSelectedTournamentArchived}
-            className="mt-4 min-h-28 w-full rounded-2xl border border-white/10 bg-[#0B1020] px-4 py-3 outline-none"
+            className="mt-4 min-h-28 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10 disabled:opacity-50"
             placeholder="Announcement content"
           />
 
@@ -1400,7 +2170,7 @@ export function OrganizerDashboardPage() {
             <p className="text-sm text-white/50">
               {isSelectedTournamentArchived
                 ? "Completed tournaments are archived in read-only mode."
-                : "Notifications will be sent to members of registered teams."}
+                : "Discord receives every announcement; in-app notifications go to registered team members."}
             </p>
 
             <button
@@ -1411,7 +2181,7 @@ export function OrganizerDashboardPage() {
                 creatingAnnouncement ||
                 isSelectedTournamentArchived
               }
-              className="flex items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 py-3 font-black text-black hover:bg-cyan-300 disabled:opacity-50"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 font-black text-slate-950 shadow-[0_16px_45px_rgba(103,232,249,0.16)] transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:opacity-50 disabled:hover:translate-y-0"
             >
               {creatingAnnouncement ? (
                 <Loader2 size={18} className="animate-spin" />
@@ -1421,13 +2191,101 @@ export function OrganizerDashboardPage() {
               Create Announcement
             </button>
           </div>
-        </section>
 
-        <section className="mt-8 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-          <div className="mb-6 flex items-center gap-3">
-            <CalendarDays className="text-amber-300" />
-            <h2 className="text-2xl font-black">Match Scheduling</h2>
+          {announcementDelivery && (
+            <div
+              className={[
+                "mt-5 grid gap-3 rounded-2xl border p-4 text-sm font-bold sm:grid-cols-3",
+                announcementDelivery.discord.configured &&
+                !announcementDelivery.discord.sent
+                  ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
+                  : "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+              ].join(" ")}
+            >
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] opacity-70">
+                  Discord
+                </p>
+                <p className="mt-1">
+                  {!announcementDelivery.discord.configured
+                    ? "Not configured"
+                    : announcementDelivery.discord.sent
+                      ? "Sent"
+                      : "Failed"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] opacity-70">
+                  In-app
+                </p>
+                <p className="mt-1">
+                  {announcementDelivery.inAppRecipients} member
+                  {announcementDelivery.inAppRecipients === 1 ? "" : "s"}{" "}
+                  notified
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] opacity-70">
+                  Status
+                </p>
+                <p className="mt-1">Announcement saved</p>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                Recent announcements
+              </p>
+              <span className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1 text-xs font-black text-slate-300">
+                {announcements.length}
+              </span>
+            </div>
+
+            {announcements.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm font-semibold text-slate-400">
+                No announcements published yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {announcements.slice(0, 4).map((item) => (
+                  <article
+                    key={item.id}
+                    className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="font-black text-white">{item.title}</p>
+                        <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-400">
+                          {item.content}
+                        </p>
+                      </div>
+                      <StatusPill value={item.type} />
+                    </div>
+                    <p className="mt-3 text-xs font-bold text-slate-500">
+                      {formatDateTime(item.createdAt)}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
           </div>
+        </PanelShell>
+
+        <PanelShell
+          icon={<CalendarDays className="size-6" />}
+          title="Match Scheduling"
+          description="Assign start times, room codes and livestream links for generated matches."
+        >
+          {bracketStatus && (
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+              <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                Bracket status
+              </span>
+              <StatusPill value={bracketStatus} />
+            </div>
+          )}
 
           {matches.length > 0 && (
             <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_180px]">
@@ -1441,7 +2299,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleMatchQueryChange(event.target.value)
                   }
-                  className="w-full rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm outline-none placeholder:text-white/35 focus:border-cyan-400/50"
+                  className="w-full rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                   placeholder="Search matches"
                 />
               </label>
@@ -1456,7 +2314,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleMatchStatusFilterChange(event.target.value)
                   }
-                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm font-bold outline-none focus:border-cyan-400/50"
+                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm font-bold outline-none transition focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                 >
                   <option value="ALL">All</option>
                   {matchStatusOptions.map((status) => (
@@ -1474,7 +2332,9 @@ export function OrganizerDashboardPage() {
               compact
               icon={CalendarDays}
               title={
-                matches.length === 0 ? "No matches to schedule" : "No matches match"
+                matches.length === 0
+                  ? "No matches to schedule"
+                  : "No matches match"
               }
               description={
                 matches.length === 0
@@ -1489,6 +2349,8 @@ export function OrganizerDashboardPage() {
                   scheduledAt: "",
                   roomCode: "",
                   livestreamUrl: "",
+                  bestOf: "BO1",
+                  note: "",
                 };
                 const isCompleted =
                   isSelectedTournamentArchived || match.status === "COMPLETED";
@@ -1496,18 +2358,22 @@ export function OrganizerDashboardPage() {
                 return (
                   <div
                     key={match.id}
-                    className="grid gap-4 rounded-3xl bg-black/30 p-5 xl:grid-cols-[1fr_210px_170px_1fr_140px_140px]"
+                    className="grid gap-4 rounded-[1.35rem] border border-white/10 bg-black/25 p-5 shadow-[0_18px_70px_rgba(0,0,0,0.16)] sm:grid-cols-2 xl:grid-cols-[minmax(180px,1.2fr)_minmax(190px,1fr)_minmax(110px,0.7fr)_minmax(130px,0.8fr)] [&>*]:min-w-0"
                   >
                     <div>
                       <p className="text-xs font-black uppercase tracking-[0.2em] text-white/40">
                         Round {match.roundNumber} - Match {match.matchNumber}
                       </p>
                       <p className="mt-2 font-black">
-                        {match.teamAId ?? "TBD"} vs {match.teamBId ?? "TBD"}
+                        {getMatchTeamLabel(match.teamAId)} vs{" "}
+                        {getMatchTeamLabel(match.teamBId)}
                       </p>
-                      <p className="mt-1 text-sm text-white/45">
-                        Status: {match.status}
-                      </p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <StatusPill value={match.status} />
+                        <span className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1 text-xs font-bold text-slate-300">
+                          {formatDateTime(match.scheduledAt)}
+                        </span>
+                      </div>
                     </div>
 
                     <input
@@ -1521,16 +2387,37 @@ export function OrganizerDashboardPage() {
                         )
                       }
                       disabled={isCompleted}
-                      className="rounded-2xl border border-white/10 bg-[#0B1020] px-4 py-3 text-sm outline-none disabled:opacity-50"
+                      className="rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm outline-none transition focus:border-amber-200/60 focus:ring-4 focus:ring-amber-200/10 disabled:opacity-50"
                     />
+
+                    <select
+                      value={form.bestOf}
+                      onChange={(event) =>
+                        updateScheduleForm(
+                          match.id,
+                          "bestOf",
+                          event.target.value,
+                        )
+                      }
+                      disabled={isCompleted}
+                      className="rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm font-bold outline-none transition focus:border-amber-200/60 focus:ring-4 focus:ring-amber-200/10 disabled:opacity-50"
+                    >
+                      <option value="BO1">BO1</option>
+                      <option value="BO3">BO3</option>
+                      <option value="BO5">BO5</option>
+                    </select>
 
                     <input
                       value={form.roomCode}
                       onChange={(event) =>
-                        updateScheduleForm(match.id, "roomCode", event.target.value)
+                        updateScheduleForm(
+                          match.id,
+                          "roomCode",
+                          event.target.value,
+                        )
                       }
                       disabled={isCompleted}
-                      className="rounded-2xl border border-white/10 bg-[#0B1020] px-4 py-3 text-sm outline-none disabled:opacity-50"
+                      className="rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm outline-none transition placeholder:text-white/35 focus:border-amber-200/60 focus:ring-4 focus:ring-amber-200/10 disabled:opacity-50"
                       placeholder="Room code"
                     />
 
@@ -1544,15 +2431,29 @@ export function OrganizerDashboardPage() {
                         )
                       }
                       disabled={isCompleted}
-                      className="rounded-2xl border border-white/10 bg-[#0B1020] px-4 py-3 text-sm outline-none disabled:opacity-50"
+                      className="rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10 disabled:opacity-50"
                       placeholder="Livestream URL"
+                    />
+
+                    <input
+                      value={form.note}
+                      onChange={(event) =>
+                        updateScheduleForm(
+                          match.id,
+                          "note",
+                          event.target.value,
+                        )
+                      }
+                      disabled={isCompleted}
+                      className="rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm outline-none transition placeholder:text-white/35 focus:border-violet-300/60 focus:ring-4 focus:ring-violet-300/10 disabled:opacity-50"
+                      placeholder="Note"
                     />
 
                     <button
                       type="button"
                       onClick={() => handleScheduleMatch(match.id)}
                       disabled={isCompleted || schedulingMatchId === match.id}
-                      className="flex items-center justify-center gap-2 rounded-2xl bg-amber-300 px-4 py-3 text-sm font-black text-black hover:bg-amber-200 disabled:opacity-50"
+                      className="flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-amber-300 px-4 py-3 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-amber-200 disabled:opacity-50 disabled:hover:translate-y-0"
                     >
                       {schedulingMatchId === match.id && (
                         <Loader2 size={16} className="animate-spin" />
@@ -1568,7 +2469,7 @@ export function OrganizerDashboardPage() {
                         match.status !== "IN_PROGRESS" ||
                         updatingLivestreamMatchId === match.id
                       }
-                      className="flex items-center justify-center gap-2 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-black text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"
+                      className="flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:-translate-y-0.5 hover:bg-cyan-300/20 disabled:opacity-50 disabled:hover:translate-y-0"
                     >
                       {updatingLivestreamMatchId === match.id ? (
                         <Loader2 size={16} className="animate-spin" />
@@ -1588,37 +2489,42 @@ export function OrganizerDashboardPage() {
               />
             </div>
           )}
-        </section>
+        </PanelShell>
 
-        <section className="mt-8 grid gap-6 md:grid-cols-3">
-          <div className="rounded-[2rem] border border-cyan-400/20 bg-cyan-400/10 p-6">
-            <GitBranch className="mb-5 text-cyan-300" />
-            <h2 className="text-2xl font-black">Bracket Engine</h2>
-            <p className="mt-3 text-white/60">
+        <section className="grid gap-4 md:grid-cols-3">
+          <article className="rounded-[1.5rem] border border-cyan-300/20 bg-cyan-300/10 p-6 shadow-[0_18px_70px_rgba(34,211,238,0.1)]">
+            <GitBranch className="mb-5 text-cyan-200" />
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-xl font-black">Bracket Engine</h2>
+              {bracketStatus && <StatusPill value={bracketStatus} />}
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
               Generate brackets from approved teams after registration closes.
             </p>
-          </div>
+          </article>
 
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-            <Radio className="mb-5 text-red-400" />
-            <h2 className="text-2xl font-black">Live Matches</h2>
-            <p className="mt-3 text-white/60">
+          <article className="rounded-[1.5rem] border border-red-300/15 bg-red-300/10 p-6 shadow-[0_18px_70px_rgba(248,113,113,0.08)]">
+            <Radio className="mb-5 text-red-200" />
+            <h2 className="text-xl font-black">Live Matches</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
               Manage match result, evidence and disputes.
             </p>
-          </div>
+          </article>
 
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-            <Activity className="mb-5 text-violet-400" />
-            <h2 className="text-2xl font-black">Audit Trail</h2>
-            <p className="mt-3 text-white/60">
+          <article className="rounded-[1.5rem] border border-violet-300/15 bg-violet-300/10 p-6 shadow-[0_18px_70px_rgba(167,139,250,0.08)]">
+            <Activity className="mb-5 text-violet-200" />
+            <h2 className="text-xl font-black">Audit Trail</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
               Track important organizer actions.
             </p>
-          </div>
+          </article>
         </section>
 
-        <section className="mt-8 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-          <h2 className="mb-6 text-2xl font-black">Dispute Center</h2>
-
+        <PanelShell
+          icon={<ShieldAlert className="size-6" />}
+          title="Dispute Center"
+          description="Review open match reports, inspect evidence and close decisions quickly."
+        >
           {disputes.length > 0 && (
             <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_180px]">
               <label className="relative block">
@@ -1631,7 +2537,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleDisputeQueryChange(event.target.value)
                   }
-                  className="w-full rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm outline-none placeholder:text-white/35 focus:border-cyan-400/50"
+                  className="w-full rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm outline-none transition placeholder:text-white/35 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                   placeholder="Search disputes"
                 />
               </label>
@@ -1646,7 +2552,7 @@ export function OrganizerDashboardPage() {
                   onChange={(event) =>
                     handleDisputeStatusFilterChange(event.target.value)
                   }
-                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#0B1020] py-3 pl-11 pr-4 text-sm font-bold outline-none focus:border-cyan-400/50"
+                  className="w-full appearance-none rounded-2xl border border-white/10 bg-[#070b16] py-3 pl-11 pr-4 text-sm font-bold outline-none transition focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
                 >
                   <option value="ALL">All</option>
                   {disputeStatusOptions.map((status) => (
@@ -1670,7 +2576,11 @@ export function OrganizerDashboardPage() {
               <EmptyState
                 compact
                 icon={ShieldAlert}
-                title={disputes.length === 0 ? "No disputes yet" : "No disputes match"}
+                title={
+                  disputes.length === 0
+                    ? "No disputes yet"
+                    : "No disputes match"
+                }
                 description={
                   disputes.length === 0
                     ? "Open match reports will be routed here for review."
@@ -1683,16 +2593,18 @@ export function OrganizerDashboardPage() {
               {pagedDisputes.map((item) => (
                 <div
                   key={item.id}
-                  className="grid gap-4 rounded-3xl bg-black/30 p-5 xl:grid-cols-[1fr_120px_330px]"
+                  className="grid gap-4 rounded-[1.35rem] border border-white/10 bg-black/25 p-5 shadow-[0_18px_70px_rgba(0,0,0,0.16)] xl:grid-cols-[1fr_140px_330px]"
                 >
                   <div>
-                    <p className="font-black">{item.reason}</p>
+                    <p className="text-lg font-black text-white">
+                      {item.reason}
+                    </p>
 
                     <p className="mt-1 text-sm text-white/50">
                       {item.description ?? "No description"}
                     </p>
 
-                    <p className="mt-1 text-xs text-cyan-400">
+                    <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-cyan-200">
                       Match: {item.matchId}
                     </p>
 
@@ -1707,17 +2619,19 @@ export function OrganizerDashboardPage() {
 
                     {item.match?.evidences?.length ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {item.match.evidences.slice(0, 4).map((evidence, index) => (
-                          <a
-                            key={evidence.id}
-                            href={evidence.imageUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-cyan-200 hover:bg-white/10"
-                          >
-                            Evidence {index + 1}
-                          </a>
-                        ))}
+                        {item.match.evidences
+                          .slice(0, 4)
+                          .map((evidence, index) => (
+                            <a
+                              key={evidence.id}
+                              href={evidence.imageUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-cyan-200 hover:bg-white/10"
+                            >
+                              Evidence {index + 1}
+                            </a>
+                          ))}
                       </div>
                     ) : null}
 
@@ -1729,8 +2643,10 @@ export function OrganizerDashboardPage() {
                   </div>
 
                   <div>
-                    <p className="text-sm text-white/50">Status</p>
-                    <p className="font-bold text-cyan-300">{item.status}</p>
+                    <p className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                      Status
+                    </p>
+                    <StatusPill value={item.status} />
                   </div>
 
                   <div className="flex items-center">
@@ -1744,7 +2660,7 @@ export function OrganizerDashboardPage() {
                             )
                           }
                           disabled={loadingAction}
-                          className="rounded-2xl bg-cyan-400 px-4 py-2 text-xs font-black text-black hover:bg-cyan-300 disabled:opacity-50"
+                          className="rounded-2xl bg-cyan-300 px-4 py-2 text-xs font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:opacity-50 disabled:hover:translate-y-0"
                         >
                           Approve Team A
                         </button>
@@ -1756,7 +2672,7 @@ export function OrganizerDashboardPage() {
                             )
                           }
                           disabled={loadingAction}
-                          className="rounded-2xl bg-violet-400 px-4 py-2 text-xs font-black text-black hover:bg-violet-300 disabled:opacity-50"
+                          className="rounded-2xl bg-violet-300 px-4 py-2 text-xs font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-violet-200 disabled:opacity-50 disabled:hover:translate-y-0"
                         >
                           Approve Team B
                         </button>
@@ -1765,7 +2681,7 @@ export function OrganizerDashboardPage() {
                             handleResolveDispute(item.id, "REMATCH")
                           }
                           disabled={loadingAction}
-                          className="rounded-2xl bg-amber-300 px-4 py-2 text-xs font-black text-black hover:bg-amber-200 disabled:opacity-50"
+                          className="rounded-2xl bg-amber-300 px-4 py-2 text-xs font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-amber-200 disabled:opacity-50 disabled:hover:translate-y-0"
                         >
                           Rematch
                         </button>
@@ -1786,11 +2702,13 @@ export function OrganizerDashboardPage() {
               />
             </div>
           )}
-        </section>
+        </PanelShell>
 
-        <section className="mt-8 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-          <h2 className="mb-6 text-2xl font-black">Audit Logs</h2>
-
+        <PanelShell
+          icon={<Activity className="size-6" />}
+          title="Audit Logs"
+          description="Recent organizer actions and metadata for traceability."
+        >
           {auditLogs.length === 0 ? (
             loadingPage ? (
               <LoadingState
@@ -1809,22 +2727,25 @@ export function OrganizerDashboardPage() {
           ) : (
             <div className="space-y-4">
               {auditLogs.slice(0, 10).map((item) => (
-                <div key={item.id} className="rounded-3xl bg-black/30 p-5">
+                <div
+                  key={item.id}
+                  className="rounded-[1.35rem] border border-white/10 bg-black/25 p-5"
+                >
                   <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                     <div>
                       <p className="font-black text-cyan-300">{item.action}</p>
                       <p className="mt-1 text-sm text-white/50">
-                        {item.entityType} • {item.entityId}
+                        {item.entityType} - {item.entityId}
                       </p>
                     </div>
 
                     <p className="text-sm text-white/40">
-                      {new Date(item.createdAt).toLocaleString()}
+                      {formatDateTime(item.createdAt)}
                     </p>
                   </div>
 
                   {item.metadata && (
-                    <pre className="mt-3 overflow-x-auto rounded-2xl bg-black/40 p-3 text-xs text-white/60">
+                    <pre className="mt-3 overflow-x-auto rounded-2xl border border-white/10 bg-black/40 p-3 text-xs text-slate-300">
                       {item.metadata}
                     </pre>
                   )}
@@ -1832,8 +2753,37 @@ export function OrganizerDashboardPage() {
               ))}
             </div>
           )}
-        </section>
+        </PanelShell>
       </div>
+
+      <AnimatePresence>
+        {createTournamentOpen && (
+          <CreateTournamentModal
+            key="create-tournament"
+            form={createTournamentForm}
+            loading={loadingAction}
+            onChange={setCreateTournamentForm}
+            onClose={() => {
+              if (!loadingAction) setCreateTournamentOpen(false);
+            }}
+            onSubmit={handleCreateTournamentSubmit}
+          />
+        )}
+
+        {rejectRegistrationTarget && (
+          <RejectRegistrationModal
+            key="reject-registration"
+            teamName={rejectRegistrationTarget.team.name}
+            reason={rejectReason}
+            loading={loadingAction}
+            onReasonChange={setRejectReason}
+            onClose={() => {
+              if (!loadingAction) setRejectRegistrationTarget(null);
+            }}
+            onSubmit={handleRejectRegistrationSubmit}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

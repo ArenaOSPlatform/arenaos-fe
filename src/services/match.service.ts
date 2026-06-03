@@ -11,6 +11,8 @@ export async function submitMatchResult(
     scoreA: number;
     scoreB: number;
     imageUrl: string;
+    fileUrl?: string;
+    type?: string;
     note?: string;
   },
 ) {
@@ -29,10 +31,12 @@ export async function disputeMatchResult(
     reason: string;
     description?: string;
     imageUrl?: string;
+    fileUrl?: string;
+    type?: string;
     note?: string;
   },
 ) {
-  const res = await api.post(`/matches/${matchId}/dispute`, payload);
+  const res = await api.post(`/matches/${matchId}/disputes`, payload);
   return res.data;
 }
 
@@ -52,6 +56,8 @@ export async function scheduleMatch(
     scheduledAt: string;
     roomCode: string;
     livestreamUrl?: string;
+    bestOf?: string;
+    note?: string;
   },
 ) {
   const res = await api.patch(`/matches/${matchId}/schedule`, payload);
@@ -65,5 +71,16 @@ export async function updateMatchLivestream(
   },
 ) {
   const res = await api.post(`/matches/${matchId}/livestream`, payload);
+  return res.data;
+}
+
+export async function completeMatch(
+  matchId: string,
+  payload: {
+    scoreA: number;
+    scoreB: number;
+  },
+) {
+  const res = await api.post(`/matches/${matchId}/complete`, payload);
   return res.data;
 }

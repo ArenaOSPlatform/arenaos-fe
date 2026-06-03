@@ -1,7 +1,7 @@
 import { api } from "./api";
 
 export async function getMyNotifications() {
-  const res = await api.get("/notifications/me");
+  const res = await api.get("/notifications");
   return res.data;
 }
 

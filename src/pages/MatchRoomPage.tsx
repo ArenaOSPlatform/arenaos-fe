@@ -1,14 +1,29 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   AlertTriangle,
+  CalendarClock,
   CheckCircle2,
-  Clock,
+  Clock3,
+  ExternalLink,
+  FileImage,
+  Flag,
+  Gamepad2,
+  Hash,
+  ImagePlus,
   Loader2,
+  Medal,
+  Play,
   Radio,
+  ShieldAlert,
+  Swords,
+  Trophy,
   Upload,
+  UploadCloud,
   Video,
+  Wifi,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import {
   getMatchEvidences,
   submitMatchEvidence,
@@ -22,7 +37,13 @@ import {
   submitMatchResult,
 } from "@/services/match.service";
 import { uploadFile } from "@/services/upload.service";
-import { EmptyState, LoadingState, useConfirm, useToast } from "@/components/ui";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { BackButton } from "@/components/ui/BackButton";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useToast } from "@/hooks/useToast";
+import { socket } from "@/sockets/socket";
+import { formatTournamentName } from "@/utils";
 
 type Match = {
   id: string;
@@ -48,6 +69,7 @@ type Match = {
   scheduledAt: string | null;
   livestreamUrl: string | null;
   roomCode: string | null;
+  bestOf: string | null;
   teamA: MatchTeam | null;
   teamB: MatchTeam | null;
   winnerTeam: MatchTeam | null;
@@ -72,6 +94,59 @@ type Evidence = {
   createdAt: string;
 };
 
+type StatusMeta = {
+  label: string;
+  icon: LucideIcon;
+  pill: string;
+  panel: string;
+};
+
+const statusMeta: Record<string, StatusMeta> = {
+  SCHEDULED: {
+    label: "Scheduled",
+    icon: CalendarClock,
+    pill: "border-cyan-300/25 bg-cyan-300/12 text-cyan-100",
+    panel: "border-cyan-300/20 bg-cyan-300/[0.045]",
+  },
+  READY: {
+    label: "Ready",
+    icon: CheckCircle2,
+    pill: "border-emerald-300/25 bg-emerald-300/12 text-emerald-100",
+    panel: "border-emerald-300/20 bg-emerald-300/[0.045]",
+  },
+  IN_PROGRESS: {
+    label: "Live",
+    icon: Radio,
+    pill: "border-red-300/25 bg-red-300/12 text-red-100",
+    panel: "border-red-300/20 bg-red-300/[0.045]",
+  },
+  PENDING_CONFIRMATION: {
+    label: "Pending",
+    icon: Clock3,
+    pill: "border-amber-300/25 bg-amber-300/12 text-amber-100",
+    panel: "border-amber-300/20 bg-amber-300/[0.045]",
+  },
+  DISPUTED: {
+    label: "Disputed",
+    icon: ShieldAlert,
+    pill: "border-red-300/25 bg-red-300/12 text-red-100",
+    panel: "border-red-300/20 bg-red-300/[0.045]",
+  },
+  COMPLETED: {
+    label: "Completed",
+    icon: Medal,
+    pill: "border-emerald-300/25 bg-emerald-300/12 text-emerald-100",
+    panel: "border-emerald-300/20 bg-emerald-300/[0.045]",
+  },
+};
+
+const fallbackStatusMeta: StatusMeta = {
+  label: "Match",
+  icon: Swords,
+  pill: "border-white/15 bg-white/8 text-slate-200",
+  panel: "border-white/10 bg-white/[0.045]",
+};
+
 function getApiErrorMessage(error: unknown, fallback: string) {
   if (typeof error === "object" && error !== null && "response" in error) {
     const response = (error as { response?: { data?: { message?: unknown } } })
@@ -85,6 +160,192 @@ function getApiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function getBestOfValue(bestOf?: string | null) {
+  const normalized = (bestOf ?? "BO1").trim().toUpperCase();
+  const match = normalized.match(/^BO([135])$/);
+  return match ? Number(match[1]) : 1;
+}
+
+function formatValidScores(winsRequired: number) {
+  return Array.from({ length: winsRequired }, (_, loserScore) => {
+    return `${winsRequired}-${loserScore}`;
+  }).join(", ");
+}
+
+function getScoreValidationMessage(
+  bestOf: string | null | undefined,
+  scoreA: number,
+  scoreB: number,
+) {
+  const bestOfValue = getBestOfValue(bestOf);
+  const winsRequired = Math.floor(bestOfValue / 2) + 1;
+  const winnerScore = Math.max(scoreA, scoreB);
+  const loserScore = Math.min(scoreA, scoreB);
+
+  if (scoreA === scoreB) return "Draw result is not allowed.";
+
+  if (winnerScore !== winsRequired || loserScore >= winsRequired) {
+    return `BO${bestOfValue} result must be one of: ${formatValidScores(
+      winsRequired,
+    )}.`;
+  }
+
+  return null;
+}
+
+function getStatusMeta(value: string) {
+  return statusMeta[value] ?? fallbackStatusMeta;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "TBA";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "TBA";
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function getInitials(name: string) {
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase() || "T"
+  );
+}
+
+function StatusPill({ value }: { value: string }) {
+  const meta = getStatusMeta(value);
+  const Icon = meta.icon;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${meta.pill}`}
+    >
+      <Icon className="size-3.5" aria-hidden="true" />
+      {meta.label}
+    </span>
+  );
+}
+
+function InfoTile({
+  icon: Icon,
+  label,
+  children,
+  tone = "border-white/10 bg-black/20 text-slate-300",
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: ReactNode;
+  tone?: string;
+}) {
+  return (
+    <div className={`rounded-2xl border p-4 ${tone}`}>
+      <Icon className="mb-3 size-5 text-cyan-200" aria-hidden="true" />
+      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+        {label}
+      </p>
+      <div className="mt-2 text-sm font-black leading-6 text-white">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TeamScoreCard({
+  name,
+  label,
+  score,
+  checkedIn,
+  logoUrl,
+  tone,
+}: {
+  name: string;
+  label: string;
+  score: number;
+  checkedIn: boolean;
+  logoUrl: string | null | undefined;
+  tone: "cyan" | "violet";
+}) {
+  const toneClass =
+    tone === "cyan"
+      ? "border-cyan-300/25 bg-cyan-300/[0.075] text-cyan-100"
+      : "border-violet-300/25 bg-violet-300/[0.075] text-violet-100";
+  const scoreClass = tone === "cyan" ? "text-cyan-200" : "text-violet-200";
+
+  return (
+    <article
+      className={`rounded-[1.75rem] border p-5 text-center shadow-[0_18px_70px_rgba(0,0,0,0.22)] ${toneClass}`}
+    >
+      <div className="mx-auto flex size-16 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black/20 text-xl font-black">
+        {logoUrl ? (
+          <img src={logoUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          getInitials(name)
+        )}
+      </div>
+      <p className="mt-4 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+        {label}
+      </p>
+      <h2 className="mt-2 line-clamp-2 min-h-16 text-3xl font-black leading-tight text-white">
+        {name}
+      </h2>
+      <span
+        className={[
+          "mt-4 inline-flex rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em]",
+          checkedIn
+            ? "border-emerald-300/25 bg-emerald-300/12 text-emerald-100"
+            : "border-white/10 bg-white/8 text-slate-400",
+        ].join(" ")}
+      >
+        {checkedIn ? "Checked in" : "Waiting"}
+      </span>
+      <p className={`mt-6 text-7xl font-black leading-none ${scoreClass}`}>
+        {score}
+      </p>
+    </article>
+  );
+}
+
+function FileInput({
+  label,
+  tone,
+  onChange,
+}: {
+  label: string;
+  tone: "cyan" | "red";
+  onChange: (file: File | null) => void;
+}) {
+  const fileTone =
+    tone === "cyan"
+      ? "file:bg-cyan-300 file:text-slate-950"
+      : "file:bg-red-300 file:text-slate-950";
+
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-black text-slate-300">
+        {label}
+      </span>
+      <input
+        type="file"
+        accept="image/*"
+        onChange={(event) => onChange(event.target.files?.[0] ?? null)}
+        className={`w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm text-slate-300 outline-none file:mr-4 file:rounded-xl file:border-0 file:px-3 file:py-2 file:font-black ${fileTone}`}
+      />
+    </label>
+  );
+}
+
 export function MatchRoomPage() {
   const { id } = useParams();
   const toast = useToast();
@@ -94,6 +355,7 @@ export function MatchRoomPage() {
   const [scoreA, setScoreA] = useState("");
   const [scoreB, setScoreB] = useState("");
   const [evidenceNote, setEvidenceNote] = useState("");
+  const [disputeEvidenceNote, setDisputeEvidenceNote] = useState("");
   const [resultEvidenceFile, setResultEvidenceFile] = useState<File | null>(
     null,
   );
@@ -143,11 +405,62 @@ export function MatchRoomPage() {
     };
   }, [id]);
 
-  async function handleSubmitResult() {
+  useEffect(() => {
     if (!id) return;
+
+    if (!socket.connected) socket.connect();
+    socket.emit("join:match", id);
+
+    const refreshMatch = () => {
+      void loadMatch(id);
+    };
+
+    socket.on("match:scheduled", refreshMatch);
+    socket.on("match:checkin_updated", refreshMatch);
+    socket.on("match:live", refreshMatch);
+    socket.on("match:score_submitted", refreshMatch);
+    socket.on("match:completed", refreshMatch);
+    socket.on("match:disputed", refreshMatch);
+
+    return () => {
+      socket.off("match:scheduled", refreshMatch);
+      socket.off("match:checkin_updated", refreshMatch);
+      socket.off("match:live", refreshMatch);
+      socket.off("match:score_submitted", refreshMatch);
+      socket.off("match:completed", refreshMatch);
+      socket.off("match:disputed", refreshMatch);
+    };
+  }, [id]);
+
+  async function handleSubmitResult() {
+    if (!id || !match) return;
 
     if (scoreA === "" || scoreB === "") {
       toast.warning("Enter both team scores before submitting.");
+      return;
+    }
+
+    const nextScoreA = Number(scoreA);
+    const nextScoreB = Number(scoreB);
+
+    if (
+      !Number.isInteger(nextScoreA) ||
+      !Number.isInteger(nextScoreB) ||
+      nextScoreA < 0 ||
+      nextScoreB < 0
+    ) {
+      toast.warning("Scores must be whole numbers.");
+      return;
+    }
+
+    const scoreValidationMessage = getScoreValidationMessage(
+      match.bestOf,
+      nextScoreA,
+      nextScoreB,
+    );
+
+    if (scoreValidationMessage) {
+      toast.warning(scoreValidationMessage);
       return;
     }
 
@@ -170,8 +483,8 @@ export function MatchRoomPage() {
       const evidenceUrl = (await uploadFile(resultEvidenceFile)).data.url;
 
       const res = await submitMatchResult(id, {
-        scoreA: Number(scoreA),
-        scoreB: Number(scoreB),
+        scoreA: nextScoreA,
+        scoreB: nextScoreB,
         imageUrl: evidenceUrl,
         note: evidenceNote || undefined,
       });
@@ -320,13 +633,13 @@ export function MatchRoomPage() {
       const res = await disputeMatchResult(id, {
         reason: disputeReason,
         imageUrl: disputeEvidenceUrl,
-        note: evidenceNote || undefined,
+        note: disputeEvidenceNote || undefined,
       });
 
       toast.success(res.message);
       setDisputeReason("");
       setDisputeEvidenceFile(null);
-      setEvidenceNote("");
+      setDisputeEvidenceNote("");
       await loadMatch(id);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Dispute result failed."));
@@ -337,19 +650,22 @@ export function MatchRoomPage() {
 
   if (!match) {
     return (
-      <div className="min-h-screen bg-[#0B1020] px-6 py-16 text-white">
-        {pageError ? (
-          <EmptyState
-            icon={AlertTriangle}
-            title="Match unavailable"
-            description={pageError}
-          />
-        ) : (
-          <LoadingState
-            title="Loading match..."
-            description="Fetching scoreboard, evidence and match room details."
-          />
-        )}
+      <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl space-y-5">
+          <BackButton fallbackTo="/tournaments" label="Back" />
+          {pageError ? (
+            <EmptyState
+              icon={AlertTriangle}
+              title="Match unavailable"
+              description={pageError}
+            />
+          ) : (
+            <LoadingState
+              title="Loading match..."
+              description="Fetching scoreboard, evidence and match room details."
+            />
+          )}
+        </div>
       </div>
     );
   }
@@ -362,152 +678,180 @@ export function MatchRoomPage() {
   );
   const resultSubmittedSlot =
     match.resultSubmittedTeamId === match.teamAId
-      ? match.teamA?.name ?? "Team A"
+      ? (match.teamA?.name ?? "Team A")
       : match.resultSubmittedTeamId === match.teamBId
-        ? match.teamB?.name ?? "Team B"
+        ? (match.teamB?.name ?? "Team B")
         : "Unknown team";
-  const teamAName = match.teamA?.name ?? match.teamAId ?? "TBD";
-  const teamBName = match.teamB?.name ?? match.teamBId ?? "TBD";
-  const winnerName = match.winnerTeam?.name ?? match.winnerId ?? "TBD";
+  const teamAName = formatTournamentName(match.teamA?.name ?? match.teamAId ?? "TBD");
+  const teamBName = formatTournamentName(match.teamB?.name ?? match.teamBId ?? "TBD");
+  const winnerName = formatTournamentName(match.winnerTeam?.name ?? match.winnerId ?? "TBD");
+  const meta = getStatusMeta(match.status);
+  const StatusIcon = meta.icon;
+  const checkInDisabled =
+    loadingAction === "check-in" ||
+    match.status === "READY" ||
+    match.status === "IN_PROGRESS" ||
+    match.status === "PENDING_CONFIRMATION" ||
+    match.status === "DISPUTED" ||
+    match.status === "COMPLETED" ||
+    match.status === "CANCELLED";
+  const canStart = match.status === "READY";
 
   return (
-    <div className="min-h-screen bg-[#0B1020] px-6 py-16">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-10">
-          <p className="text-sm font-bold tracking-[0.3em] text-cyan-400">
-            MATCH ROOM
-          </p>
-          <h1 className="mt-4 text-5xl font-black">
-            {teamAName} vs {teamBName}
-          </h1>
-          <p className="mt-4 text-white/60">
-            {match.tournament.name} - Round {match.roundNumber}, Match{" "}
-            {match.matchNumber}
-          </p>
-        </div>
+    <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <BackButton fallbackTo="/tournaments" label="Back" />
 
-        <section className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-8">
-            <div className="mb-8 flex items-center justify-between">
-              <span className="rounded-full bg-red-500 px-4 py-1 text-xs font-black">
-                {match.status}
+        <header
+          className={`rounded-[2rem] border p-5 shadow-[0_24px_100px_rgba(0,0,0,0.3)] backdrop-blur-2xl sm:p-6 ${meta.panel}`}
+        >
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.2em] text-cyan-100">
+                  <Swords className="size-4" aria-hidden="true" />
+                  Match Room
+                </span>
+                <StatusPill value={match.status} />
+              </div>
+              <h1 className="mt-5 text-4xl font-black leading-tight text-white sm:text-5xl">
+                {teamAName} <span className="text-slate-500">vs</span>{" "}
+                {teamBName}
+              </h1>
+              <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-bold text-slate-400">
+                <span className="inline-flex items-center gap-2">
+                  <Trophy className="size-4 text-amber-200" />
+                  {formatTournamentName(match.tournament.name)}
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <Gamepad2 className="size-4 text-cyan-200" />
+                  {match.tournament.game}
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <Hash className="size-4 text-cyan-200" />
+                  Round {match.roundNumber}, Match {match.matchNumber}
+                </span>
+              </p>
+            </div>
+
+            <div className="flex min-w-60 items-center gap-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+              <span
+                className={`inline-flex size-12 items-center justify-center rounded-2xl border ${meta.pill}`}
+              >
+                <StatusIcon className="size-6" aria-hidden="true" />
               </span>
-
-              <div className="flex items-center gap-2 text-cyan-300">
-                <Radio size={18} />
-                <span className="font-bold">Realtime Match</span>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                  Match state
+                </p>
+                <p className="mt-1 font-black text-white">{meta.label}</p>
               </div>
             </div>
+          </div>
+        </header>
 
-            <div className="grid items-center gap-6 md:grid-cols-[1fr_auto_1fr]">
-              <div className="rounded-3xl border border-cyan-400/40 bg-cyan-400/10 p-8 text-center">
-                <h2 className="text-3xl font-black">{teamAName}</h2>
-                <p className="mt-3 text-white/50">Team A</p>
-                <p
-                  className={`mt-4 inline-flex rounded-full px-3 py-1 text-xs font-black ${
-                    match.teamACheckedInAt
-                      ? "bg-emerald-400/15 text-emerald-300"
-                      : "bg-white/10 text-white/45"
-                  }`}
-                >
-                  {match.teamACheckedInAt ? "CHECKED IN" : "WAITING"}
-                </p>
-                <p className="mt-6 text-7xl font-black text-cyan-300">
-                  {match.scoreA}
-                </p>
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_420px]">
+          <main className="space-y-6">
+            <section className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl sm:p-6">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                    Scoreboard
+                  </p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Scores finalize after captain confirmation.
+                  </p>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm font-black text-cyan-100">
+                  <Wifi className="size-4" aria-hidden="true" />
+                  Realtime Match
+                </div>
               </div>
 
-              <div className="text-center text-3xl font-black text-white/40">
-                VS
+              <div className="grid items-stretch gap-4 lg:grid-cols-[1fr_88px_1fr]">
+                <TeamScoreCard
+                  name={teamAName}
+                  label="Team A"
+                  score={match.scoreA}
+                  checkedIn={Boolean(match.teamACheckedInAt)}
+                  logoUrl={match.teamA?.logoUrl}
+                  tone="cyan"
+                />
+
+                <div className="flex items-center justify-center">
+                  <span className="inline-flex size-16 items-center justify-center rounded-2xl border border-white/10 bg-black/25 text-xl font-black text-slate-500">
+                    VS
+                  </span>
+                </div>
+
+                <TeamScoreCard
+                  name={teamBName}
+                  label="Team B"
+                  score={match.scoreB}
+                  checkedIn={Boolean(match.teamBCheckedInAt)}
+                  logoUrl={match.teamB?.logoUrl}
+                  tone="violet"
+                />
               </div>
 
-              <div className="rounded-3xl border border-violet-400/40 bg-violet-400/10 p-8 text-center">
-                <h2 className="text-3xl font-black">{teamBName}</h2>
-                <p className="mt-3 text-white/50">Team B</p>
-                <p
-                  className={`mt-4 inline-flex rounded-full px-3 py-1 text-xs font-black ${
-                    match.teamBCheckedInAt
-                      ? "bg-emerald-400/15 text-emerald-300"
-                      : "bg-white/10 text-white/45"
-                  }`}
-                >
-                  {match.teamBCheckedInAt ? "CHECKED IN" : "WAITING"}
-                </p>
-                <p className="mt-6 text-7xl font-black text-violet-300">
-                  {match.scoreB}
-                </p>
-              </div>
-            </div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                <InfoTile icon={CalendarClock} label="Scheduled">
+                  {formatDate(match.scheduledAt)}
+                </InfoTile>
 
-            <div className="mt-8 grid gap-4 md:grid-cols-4">
-              <div className="rounded-3xl bg-black/30 p-5">
-                <Clock className="mb-3 text-cyan-400" />
-                <p className="text-sm text-white/50">Scheduled</p>
-                <p className="font-black">
-                  {match.scheduledAt
-                    ? new Date(match.scheduledAt).toLocaleString()
-                    : "TBA"}
-                </p>
-              </div>
+                <InfoTile icon={Video} label="Stream">
+                  {match.status === "IN_PROGRESS" && match.livestreamUrl ? (
+                    <a
+                      href={match.livestreamUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 text-red-100 transition hover:text-white"
+                    >
+                      Watch Live
+                      <ExternalLink className="size-4" aria-hidden="true" />
+                    </a>
+                  ) : (
+                    (match.livestreamUrl ?? "TBA")
+                  )}
+                </InfoTile>
 
-              <div className="rounded-3xl bg-black/30 p-5">
-                <Video className="mb-3 text-violet-400" />
-                <p className="text-sm text-white/50">Stream</p>
-                {match.status === "IN_PROGRESS" && match.livestreamUrl ? (
-                  <a
-                    href={match.livestreamUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-2 inline-flex rounded-xl bg-red-400 px-3 py-2 text-sm font-black text-black hover:bg-red-300"
-                  >
-                    Watch Live
-                  </a>
-                ) : (
-                  <p className="font-black">{match.livestreamUrl ?? "TBA"}</p>
-                )}
-              </div>
+                <InfoTile icon={Radio} label="Room Code">
+                  {match.roomCode ?? "TBA"}
+                </InfoTile>
 
-              <div className="rounded-3xl bg-black/30 p-5">
-                <Radio className="mb-3 text-amber-300" />
-                <p className="text-sm text-white/50">Room Code</p>
-                <p className="font-black">{match.roomCode ?? "TBA"}</p>
-              </div>
+                <InfoTile icon={Swords} label="Format">
+                  {match.bestOf ?? "BO1"}
+                </InfoTile>
 
-              <div className="rounded-3xl bg-black/30 p-5">
-                <CheckCircle2 className="mb-3 text-green-400" />
-                <p className="text-sm text-white/50">Winner</p>
-                <p className="font-black">{winnerName}</p>
+                <InfoTile icon={Medal} label="Winner">
+                  {winnerName}
+                </InfoTile>
               </div>
-            </div>
+            </section>
 
-            <div className="mt-8 rounded-3xl border border-cyan-400/20 bg-cyan-400/10 p-5">
+            <section className="rounded-[2rem] border border-cyan-300/20 bg-cyan-300/[0.055] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:p-6">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div>
-                  <p className="font-black">Captain Check-in</p>
-                  <p className="mt-1 text-sm text-white/55">
-                    Match becomes READY after both captains check in.
+                  <h2 className="text-2xl font-black text-white">
+                    Captain Check-in
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Match becomes READY after both captains check in, then the
+                    organizer can start live play.
                   </p>
                 </div>
 
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <button
                     type="button"
                     onClick={handleCheckIn}
-                    disabled={
-                      loadingAction === "check-in" ||
-                      match.status === "READY" ||
-                      match.status === "IN_PROGRESS" ||
-                      match.status === "PENDING_CONFIRMATION" ||
-                      match.status === "DISPUTED" ||
-                      match.status === "COMPLETED" ||
-                      match.status === "CANCELLED"
-                    }
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 py-3 font-black text-black hover:bg-cyan-300 disabled:opacity-50"
+                    disabled={checkInDisabled}
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                   >
                     {loadingAction === "check-in" ? (
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 className="size-4 animate-spin" />
                     ) : (
-                      <CheckCircle2 size={18} />
+                      <CheckCircle2 className="size-4" />
                     )}
                     Check in
                   </button>
@@ -515,96 +859,45 @@ export function MatchRoomPage() {
                   <button
                     type="button"
                     onClick={handleStartMatch}
-                    disabled={loadingAction === "start" || match.status !== "READY"}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 font-black text-black hover:bg-emerald-300 disabled:opacity-50"
+                    disabled={loadingAction === "start" || !canStart}
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                   >
                     {loadingAction === "start" ? (
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 className="size-4 animate-spin" />
                     ) : (
-                      <Radio size={18} />
+                      <Play className="size-4" />
                     )}
                     Start Match
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <aside className="space-y-6">
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-              <h2 className="text-2xl font-black">Submit Result</h2>
-
-              {match.status === "IN_PROGRESS" ? (
-                <>
-                  <div className="mt-6 grid grid-cols-2 gap-4">
-                    <input
-                      type="number"
-                      value={scoreA}
-                      onChange={(event) => setScoreA(event.target.value)}
-                      className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none"
-                      placeholder="Team A score"
-                    />
-                    <input
-                      type="number"
-                      value={scoreB}
-                      onChange={(event) => setScoreB(event.target.value)}
-                      className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none"
-                      placeholder="Team B score"
-                    />
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) =>
-                        setResultEvidenceFile(event.target.files?.[0] ?? null)
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-cyan-400 file:px-3 file:py-2 file:font-black file:text-black"
-                    />
-                    <input
-                      value={evidenceNote}
-                      onChange={(event) => setEvidenceNote(event.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none"
-                      placeholder="Evidence note"
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleSubmitResult}
-                    disabled={loadingAction === "score"}
-                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 py-3 font-bold text-black hover:bg-cyan-300 disabled:opacity-50"
-                  >
-                    {loadingAction === "score" && (
-                      <Loader2 size={18} className="animate-spin" />
-                    )}
-                    Submit for Confirmation
-                  </button>
-                </>
-              ) : (
-                <p className="mt-5 rounded-2xl bg-black/30 p-4 text-sm text-white/55">
-                  Result submission opens when the match is IN_PROGRESS.
-                </p>
-              )}
-            </div>
+            </section>
 
             {isPendingConfirmation && (
-              <div className="rounded-[2rem] border border-amber-300/25 bg-amber-300/10 p-6">
-                <Clock className="mb-4 text-amber-200" />
-                <h2 className="text-2xl font-black">Pending Confirmation</h2>
+              <section className="rounded-[2rem] border border-amber-300/25 bg-amber-300/[0.075] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.22)] backdrop-blur-2xl sm:p-6">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <Clock3 className="mb-4 size-6 text-amber-200" />
+                    <h2 className="text-2xl font-black text-white">
+                      Pending Confirmation
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      Submitted by {resultSubmittedSlot}. Confirm to complete
+                      the match or dispute for organizer review.
+                    </p>
+                  </div>
 
-                <div className="mt-5 rounded-3xl bg-black/30 p-5 text-center">
-                  <p className="text-sm text-white/50">
-                    Submitted by {resultSubmittedSlot}
-                  </p>
-                  <p className="mt-2 text-5xl font-black text-amber-200">
-                    {match.pendingScoreA ?? 0} - {match.pendingScoreB ?? 0}
-                  </p>
-                  <p className="mt-2 text-xs text-white/40">
-                    {match.resultSubmittedAt
-                      ? new Date(match.resultSubmittedAt).toLocaleString()
-                      : "Awaiting review"}
-                  </p>
+                  <div className="rounded-3xl border border-white/10 bg-black/25 p-5 text-center">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                      Pending score
+                    </p>
+                    <p className="mt-2 text-5xl font-black text-amber-100">
+                      {match.pendingScoreA ?? 0} - {match.pendingScoreB ?? 0}
+                    </p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      {formatDate(match.resultSubmittedAt)}
+                    </p>
+                  </div>
                 </div>
 
                 {pendingEvidence && (
@@ -612,77 +905,150 @@ export function MatchRoomPage() {
                     href={pendingEvidence.imageUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-4 flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3 font-bold text-cyan-200 hover:bg-white/10"
+                    className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-sm font-black text-cyan-100 transition hover:bg-white/[0.1]"
                   >
-                    <Upload size={18} />
+                    <FileImage className="size-4" />
                     View Submitted Evidence
                   </a>
                 )}
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={handleConfirmResult}
                     disabled={loadingAction === "confirm-result"}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 font-bold text-black hover:bg-emerald-300 disabled:opacity-50"
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                   >
                     {loadingAction === "confirm-result" ? (
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 className="size-4 animate-spin" />
                     ) : (
-                      <CheckCircle2 size={18} />
+                      <CheckCircle2 className="size-4" />
                     )}
-                    Confirm
+                    Confirm Result
                   </button>
 
                   <button
                     type="button"
                     onClick={handleDisputeResult}
                     disabled={loadingAction === "dispute"}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-red-400 px-5 py-3 font-bold text-black hover:bg-red-300 disabled:opacity-50"
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-red-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
                   >
                     {loadingAction === "dispute" ? (
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 className="size-4 animate-spin" />
                     ) : (
-                      <AlertTriangle size={18} />
+                      <AlertTriangle className="size-4" />
                     )}
                     Dispute
                   </button>
                 </div>
-              </div>
+              </section>
             )}
+          </main>
 
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-              <h2 className="text-2xl font-black">Evidence Archive</h2>
+          <aside className="space-y-6">
+            <section className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl">
+              <h2 className="flex items-center gap-3 text-2xl font-black text-white">
+                <Flag className="size-6 text-cyan-200" />
+                Submit Result
+              </h2>
 
-              <div className="mt-5 rounded-3xl border border-cyan-400/20 bg-cyan-400/10 p-4">
-                <p className="font-black">Upload Evidence</p>
-                <div className="mt-3 space-y-3">
+              {match.status === "IN_PROGRESS" ? (
+                <div className="mt-5 space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <label>
+                      <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                        Team A
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={scoreA}
+                        onChange={(event) => setScoreA(event.target.value)}
+                        className="h-13 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 text-sm font-black text-white outline-none focus:border-cyan-200/50 focus:ring-4 focus:ring-cyan-300/10"
+                        placeholder="0"
+                      />
+                    </label>
+                    <label>
+                      <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                        Team B
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={scoreB}
+                        onChange={(event) => setScoreB(event.target.value)}
+                        className="h-13 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 text-sm font-black text-white outline-none focus:border-cyan-200/50 focus:ring-4 focus:ring-cyan-300/10"
+                        placeholder="0"
+                      />
+                    </label>
+                  </div>
+
+                  <FileInput
+                    label="Result evidence"
+                    tone="cyan"
+                    onChange={setResultEvidenceFile}
+                  />
+
                   <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) =>
-                      setArchiveEvidenceFile(event.target.files?.[0] ?? null)
-                    }
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-cyan-400 file:px-3 file:py-2 file:font-black file:text-black"
+                    value={evidenceNote}
+                    onChange={(event) => setEvidenceNote(event.target.value)}
+                    className="h-13 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-cyan-200/50 focus:ring-4 focus:ring-cyan-300/10"
+                    placeholder="Evidence note"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={handleSubmitResult}
+                    disabled={loadingAction === "score"}
+                    className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                  >
+                    {loadingAction === "score" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <UploadCloud className="size-4" />
+                    )}
+                    Submit for Confirmation
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-slate-400">
+                  Result submission opens when the match is IN_PROGRESS.
+                </p>
+              )}
+            </section>
+
+            <section className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl">
+              <h2 className="flex items-center gap-3 text-2xl font-black text-white">
+                <ImagePlus className="size-6 text-cyan-200" />
+                Evidence Archive
+              </h2>
+
+              <div className="mt-5 rounded-3xl border border-cyan-300/20 bg-cyan-300/[0.055] p-4">
+                <p className="font-black text-white">Upload Evidence</p>
+                <div className="mt-3 space-y-3">
+                  <FileInput
+                    label="Evidence image"
+                    tone="cyan"
+                    onChange={setArchiveEvidenceFile}
                   />
                   <input
                     value={archiveEvidenceNote}
                     onChange={(event) =>
                       setArchiveEvidenceNote(event.target.value)
                     }
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none"
+                    className="h-13 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-cyan-200/50 focus:ring-4 focus:ring-cyan-300/10"
                     placeholder="Evidence note"
                   />
                   <button
                     type="button"
                     onClick={handleUploadEvidence}
                     disabled={loadingAction === "upload-evidence"}
-                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-5 py-3 font-bold text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"
+                    className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-5 text-sm font-black text-cyan-100 transition hover:bg-cyan-300/18 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {loadingAction === "upload-evidence" ? (
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 className="size-4 animate-spin" />
                     ) : (
-                      <Upload size={18} />
+                      <Upload className="size-4" />
                     )}
                     Upload Evidence
                   </button>
@@ -699,65 +1065,81 @@ export function MatchRoomPage() {
                   />
                 ) : (
                   evidences.map((item) => (
-                    <div key={item.id} className="rounded-2xl bg-black/30 p-4">
+                    <article
+                      key={item.id}
+                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                    >
                       <a
                         href={item.imageUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="font-bold text-cyan-300"
+                        className="inline-flex items-center gap-2 font-black text-cyan-100 transition hover:text-white"
                       >
+                        <FileImage className="size-4" />
                         Evidence image
+                        <ExternalLink className="size-4" />
                       </a>
-                      <p className="mt-1 text-sm text-white/50">
-                        {item.note ?? "No note"} - {item.submittedBy}
+                      <p className="mt-2 text-sm leading-6 text-slate-400">
+                        {item.note ?? "No note"} by {item.submittedBy}
                       </p>
-                    </div>
+                      <p className="mt-1 text-xs text-slate-600">
+                        {formatDate(item.createdAt)}
+                      </p>
+                    </article>
                   ))
                 )}
               </div>
-            </div>
+            </section>
 
-            <div className="rounded-[2rem] border border-red-400/20 bg-red-400/10 p-6">
-              <AlertTriangle className="mb-4 text-red-300" />
-              <h2 className="text-2xl font-black">Dispute Center</h2>
+            <section className="rounded-[2rem] border border-red-300/20 bg-red-300/[0.055] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl">
+              <h2 className="flex items-center gap-3 text-2xl font-black text-white">
+                <ShieldAlert className="size-6 text-red-200" />
+                Dispute Center
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Disputes are only available while a submitted result is waiting
+                for confirmation.
+              </p>
 
               <input
                 value={disputeReason}
                 onChange={(event) => setDisputeReason(event.target.value)}
-                className="mt-5 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none"
-                placeholder="Reason"
+                className="mt-5 h-13 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-red-200/50 focus:ring-4 focus:ring-red-300/10"
+                placeholder="Dispute reason"
               />
 
               {isPendingConfirmation && (
                 <div className="mt-3 space-y-3">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) =>
-                      setDisputeEvidenceFile(event.target.files?.[0] ?? null)
-                    }
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-red-400 file:px-3 file:py-2 file:font-black file:text-black"
+                  <FileInput
+                    label="Dispute evidence"
+                    tone="red"
+                    onChange={setDisputeEvidenceFile}
                   />
                   <input
-                    value={evidenceNote}
-                    onChange={(event) => setEvidenceNote(event.target.value)}
-                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none"
+                    value={disputeEvidenceNote}
+                    onChange={(event) =>
+                      setDisputeEvidenceNote(event.target.value)
+                    }
+                    className="h-13 w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-red-200/50 focus:ring-4 focus:ring-red-300/10"
                     placeholder="Evidence note"
                   />
                 </div>
               )}
 
               <button
+                type="button"
                 onClick={handleDisputeResult}
                 disabled={loadingAction === "dispute" || !isPendingConfirmation}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-red-400 px-5 py-3 font-bold text-black hover:bg-red-300 disabled:opacity-50"
+                className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-red-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
               >
-                {loadingAction === "dispute" && (
-                  <Loader2 size={18} className="animate-spin" />
+                {loadingAction === "dispute" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <AlertTriangle className="size-4" />
                 )}
                 Dispute Pending Result
               </button>
-            </div>
+            </section>
           </aside>
         </section>
       </div>

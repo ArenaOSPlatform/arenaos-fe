@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { type ReactNode, useEffect, useState } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   BarChart3,
@@ -20,12 +20,19 @@ import {
   getTournamentAnnouncements,
   getTournamentById,
   getTournamentLeaderboard,
+  getTournamentRegistrations,
   registerTeamToTournament,
   type TournamentAnnouncement,
   type TournamentLeaderboardRow,
 } from "@/services/tournament.service";
 import { getMyTeam } from "@/services/team.service";
-import { EmptyState, LoadingState, useConfirm, useToast } from "@/components/ui";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { BackButton } from "@/components/ui/BackButton";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useToast } from "@/hooks/useToast";
+import { socket } from "@/sockets/socket";
+import { formatTournamentName } from "@/utils";
 
 function getApiErrorMessage(error: unknown, fallback: string) {
   if (typeof error === "object" && error !== null && "response" in error) {
@@ -56,6 +63,8 @@ type Tournament = {
   format: string;
   prizePool: string | null;
   rules: string | null;
+  region: string | null;
+  livestreamUrl: string | null;
   status: string;
   startDate: string;
   championTeamId: string | null;
@@ -84,6 +93,9 @@ type Match = {
 
 type Bracket = {
   id: string;
+  status: string;
+  format: string;
+  generatedAt: string;
   matches: Match[];
 };
 
@@ -107,49 +119,250 @@ type Team = {
   members: TeamMember[];
 };
 
+type TournamentRegistration = {
+  id: string;
+  teamId: string;
+  status: string;
+  rejectReason: string | null;
+  lineupData: string | null;
+  createdAt: string;
+  updatedAt: string;
+  team?: {
+    id: string;
+    name: string;
+  };
+};
+
 type TournamentDetailTab = "BRACKET" | "LEADERBOARD";
 
 function getAnnouncementTone(type: TournamentAnnouncement["type"]) {
   if (type === "URGENT") {
     return {
-      wrapper: "border-red-400/30 bg-red-400/10",
-      label: "bg-red-400 text-black",
-      icon: "text-red-300",
+      wrapper: "border-red-300/20 bg-red-300/10",
+      label: "border-red-300/20 bg-red-300/10 text-red-100",
+      icon: "text-red-200",
     };
   }
 
   if (type === "WARNING") {
     return {
-      wrapper: "border-amber-300/30 bg-amber-300/10",
-      label: "bg-amber-300 text-black",
+      wrapper: "border-amber-300/20 bg-amber-300/10",
+      label: "border-amber-300/20 bg-amber-300/10 text-amber-100",
       icon: "text-amber-200",
     };
   }
 
   return {
-    wrapper: "border-cyan-400/25 bg-cyan-400/10",
-    label: "bg-cyan-400 text-black",
-    icon: "text-cyan-300",
+    wrapper: "border-cyan-300/20 bg-cyan-300/10",
+    label: "border-cyan-300/20 bg-cyan-300/10 text-cyan-100",
+    icon: "text-cyan-200",
   };
+}
+
+type Tone = "cyan" | "emerald" | "amber" | "red" | "violet" | "slate";
+
+const toneClasses: Record<Tone, string> = {
+  cyan: "border-cyan-300/20 bg-cyan-300/10 text-cyan-100",
+  emerald: "border-emerald-300/20 bg-emerald-300/10 text-emerald-100",
+  amber: "border-amber-300/20 bg-amber-300/10 text-amber-100",
+  red: "border-red-300/20 bg-red-300/10 text-red-100",
+  violet: "border-violet-300/20 bg-violet-300/10 text-violet-100",
+  slate: "border-white/10 bg-white/[0.055] text-slate-200",
+};
+
+function getStatusTone(status: string): Tone {
+  if (["APPROVED", "OPEN_REGISTRATION", "IN_PROGRESS", "COMPLETED"].includes(status)) {
+    return "emerald";
+  }
+
+  if (["PENDING", "PENDING_APPROVAL", "MATCH_SCHEDULED"].includes(status)) {
+    return "amber";
+  }
+
+  if (["REJECTED", "DISPUTED", "CANCELLED"].includes(status)) {
+    return "red";
+  }
+
+  if (["BRACKET_GENERATED", "REGISTRATION_CLOSED", "LOCKED"].includes(status)) {
+    return "violet";
+  }
+
+  return "cyan";
+}
+
+function formatStatus(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "TBA";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "TBA";
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "TBA";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "TBA";
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function StatusPill({ value }: { value: string }) {
+  const tone = getStatusTone(value);
+
+  return (
+    <span
+      className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${toneClasses[tone]}`}
+    >
+      <span className="size-1.5 rounded-full bg-current" />
+      {formatStatus(value)}
+    </span>
+  );
+}
+
+function getRegistrationButtonLabel(
+  registration: TournamentRegistration | null,
+  tournamentStatus: string,
+  canRegister: boolean,
+) {
+  if (registration?.status === "PENDING") return "Lineup Pending";
+  if (registration?.status === "APPROVED") return "Lineup Approved";
+  if (registration?.status === "REJECTED") return "Lineup Rejected";
+  if (tournamentStatus === "COMPLETED") return "Tournament Archived";
+
+  return canRegister ? "Register Team" : "Registration Closed";
+}
+
+function getRegistrationStatusMessage(status: string) {
+  if (status === "PENDING") return "Waiting for organizer review.";
+  if (status === "APPROVED") {
+    return "Your team has been approved for this tournament.";
+  }
+  if (status === "REJECTED") return "Organizer rejected this lineup.";
+
+  return "Registration status updated.";
+}
+
+function MetricCard({
+  icon,
+  label,
+  value,
+  helper,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: ReactNode;
+  helper?: ReactNode;
+  tone: Tone;
+}) {
+  return (
+    <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+            {label}
+          </p>
+          <p className="mt-3 text-3xl font-black leading-none text-white">
+            {value}
+          </p>
+          {helper && <p className="mt-2 text-sm text-slate-400">{helper}</p>}
+        </div>
+        <span
+          className={`inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border ${toneClasses[tone]}`}
+        >
+          {icon}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function PanelShell({
+  icon,
+  title,
+  description,
+  children,
+  className = "",
+}: {
+  icon: ReactNode;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={[
+        "overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] shadow-[0_24px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
+        className,
+      ].join(" ")}
+    >
+      <div className="border-b border-white/10 px-5 py-5 sm:px-6">
+        <div className="flex items-start gap-3">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100">
+            {icon}
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-2xl font-black text-white">{title}</h2>
+            {description && (
+              <p className="mt-1 text-sm leading-6 text-slate-400">
+                {description}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 sm:p-6">{children}</div>
+    </section>
+  );
 }
 
 export function TournamentDetailPage() {
   const { id } = useParams();
+  const location = useLocation();
   const toast = useToast();
   const confirm = useConfirm();
+  const routeDefaultTab: TournamentDetailTab =
+    location.pathname.endsWith("/leaderboard") ||
+    location.pathname.startsWith("/leaderboards/")
+    ? "LEADERBOARD"
+    : "BRACKET";
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [bracket, setBracket] = useState<Bracket | null>(null);
-  const [leaderboard, setLeaderboard] = useState<TournamentLeaderboardRow[]>([]);
+  const [leaderboard, setLeaderboard] = useState<TournamentLeaderboardRow[]>(
+    [],
+  );
   const [announcements, setAnnouncements] = useState<TournamentAnnouncement[]>(
     [],
   );
-  const [activeTab, setActiveTab] = useState<TournamentDetailTab>("BRACKET");
+  const [activeTab, setActiveTab] =
+    useState<TournamentDetailTab>(routeDefaultTab);
   const [pageError, setPageError] = useState("");
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [lineupLoading, setLineupLoading] = useState(false);
   const [team, setTeam] = useState<Team | null>(null);
+  const [myRegistration, setMyRegistration] =
+    useState<TournamentRegistration | null>(null);
+  const [registrationStatusLoading, setRegistrationStatusLoading] =
+    useState(false);
   const [mainPlayerIds, setMainPlayerIds] = useState<string[]>([]);
   const [substituteIds, setSubstituteIds] = useState<string[]>([]);
   const requiredLineupSize = tournament?.teamSize ?? 0;
@@ -178,7 +391,47 @@ export function TournamentDetailPage() {
     } catch {
       setAnnouncements([]);
     }
+
+    void loadMyRegistration(tournamentId);
   }
+
+  async function loadMyRegistration(tournamentId: string) {
+    if (!localStorage.getItem("accessToken")) {
+      setMyRegistration(null);
+      return;
+    }
+
+    try {
+      setRegistrationStatusLoading(true);
+
+      const [teamRes, registrationsRes] = await Promise.all([
+        getMyTeam(),
+        getTournamentRegistrations(tournamentId),
+      ]);
+      const currentTeam = teamRes.data as Team | null;
+
+      setTeam(currentTeam);
+
+      const registrations = (registrationsRes.data ??
+        []) as TournamentRegistration[];
+      const registration =
+        currentTeam &&
+        registrations.find(
+          (item) =>
+            item.teamId === currentTeam.id || item.team?.id === currentTeam.id,
+        );
+
+      setMyRegistration(registration || null);
+    } catch {
+      setMyRegistration(null);
+    } finally {
+      setRegistrationStatusLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setActiveTab(routeDefaultTab);
+  }, [routeDefaultTab]);
 
   useEffect(() => {
     if (!id) return;
@@ -203,6 +456,31 @@ export function TournamentDetailPage() {
       window.clearTimeout(timer);
     };
   }, [id, toast]);
+
+  useEffect(() => {
+    if (!id) return;
+
+    if (!socket.connected) socket.connect();
+    socket.emit("join:tournament", id);
+
+    const refreshTournament = () => {
+      void fetchData(id);
+    };
+
+    socket.on("tournament:status_changed", refreshTournament);
+    socket.on("registration:updated", refreshTournament);
+    socket.on("bracket:generated", refreshTournament);
+    socket.on("bracket:updated", refreshTournament);
+    socket.on("leaderboard:updated", refreshTournament);
+
+    return () => {
+      socket.off("tournament:status_changed", refreshTournament);
+      socket.off("registration:updated", refreshTournament);
+      socket.off("bracket:generated", refreshTournament);
+      socket.off("bracket:updated", refreshTournament);
+      socket.off("leaderboard:updated", refreshTournament);
+    };
+  }, [id]);
 
   async function handleOpenRegisterModal() {
     if (!id) return;
@@ -239,7 +517,9 @@ export function TournamentDetailPage() {
       }
 
       if (prev.length >= requiredLineupSize) {
-        toast.warning(`Main lineup needs exactly ${requiredLineupSize} players.`);
+        toast.warning(
+          `Main lineup needs exactly ${requiredLineupSize} players.`,
+        );
         return prev;
       }
 
@@ -290,8 +570,10 @@ export function TournamentDetailPage() {
         mainPlayerIds,
         substituteIds,
       });
+      setMyRegistration(res.data as TournamentRegistration);
       toast.success(res.message);
       setRegisterModalOpen(false);
+      void fetchData(id);
     } catch {
       toast.error(
         "Register team failed. Make sure registration is open and you are a captain.",
@@ -303,26 +585,32 @@ export function TournamentDetailPage() {
 
   if (!tournament) {
     return (
-      <div className="min-h-screen bg-[#0B1020] px-6 py-16 text-white">
-        {pageError ? (
-          <EmptyState
-            title="Tournament unavailable"
-            description={pageError}
-            icon={Trophy}
-          />
-        ) : (
-          <LoadingState
-            title="Loading tournament..."
-            description="Fetching tournament details, rules and bracket data."
-          />
-        )}
+      <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
+        <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(180deg,#050816_0%,#08111f_48%,#050816_100%)]" />
+        <div className="mx-auto max-w-4xl space-y-5">
+          <BackButton fallbackTo="/tournaments" label="Back to tournaments" />
+          {pageError ? (
+            <EmptyState
+              title="Tournament unavailable"
+              description={pageError}
+              icon={Trophy}
+            />
+          ) : (
+            <LoadingState
+              title="Loading tournament..."
+              description="Fetching tournament details, rules and bracket data."
+            />
+          )}
+        </div>
       </div>
     );
   }
 
   const canRegister = tournament.status === "OPEN_REGISTRATION";
-  const totalTeams = leaderboard.length || tournament._count?.registrations || 0;
-  const totalMatches = bracket?.matches.length ?? tournament._count?.matches ?? 0;
+  const totalTeams =
+    leaderboard.length || tournament._count?.registrations || 0;
+  const totalMatches =
+    bracket?.matches.length ?? tournament._count?.matches ?? 0;
   const completedMatches =
     bracket?.matches.filter((match) => match.status === "COMPLETED").length ??
     0;
@@ -330,73 +618,120 @@ export function TournamentDetailPage() {
     leaderboard.map((row) => [row.teamId, row.teamName]),
   );
   const getTeamLabel = (teamId: string | null) =>
-    teamId ? teamNameById.get(teamId) ?? teamId : "TBD";
-  const registerButtonLabel =
-    tournament.status === "COMPLETED"
-      ? "Tournament Archived"
-      : canRegister
-        ? "Register Team"
-        : "Registration Closed";
+    teamId ? formatTournamentName(teamNameById.get(teamId) ?? teamId) : "TBD";
+  const registerButtonLabel = getRegistrationButtonLabel(
+    myRegistration,
+    tournament.status,
+    canRegister,
+  );
+  const bracketMatches = bracket?.matches ?? [];
+  const completedAtLabel = tournament.completedAt
+    ? formatDateTime(tournament.completedAt)
+    : null;
 
   return (
-    <div className="min-h-screen bg-[#0B1020] px-6 py-16">
-      <div className="mx-auto max-w-7xl">
-        <section className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-8 backdrop-blur-xl">
+    <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(180deg,#050816_0%,#08111f_46%,#050816_100%)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:64px_64px] opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent_88%)]" />
+
+      <div className="mx-auto max-w-7xl space-y-6">
+        <BackButton fallbackTo="/tournaments" label="Back to tournaments" />
+
+        <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.055] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.32)] backdrop-blur-2xl sm:p-8">
           {tournament.bannerUrl && (
             <img
               src={tournament.bannerUrl}
               alt={tournament.name}
-              className="mb-8 h-64 w-full rounded-3xl object-cover"
+              className="absolute inset-0 h-full w-full object-cover opacity-25"
             />
           )}
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,8,22,0.96),rgba(5,8,22,0.78),rgba(5,8,22,0.5))]" />
 
-          <div className="mb-8 flex flex-wrap items-center gap-3">
-            <span className="rounded-full bg-cyan-400 px-4 py-1 text-xs font-black text-black">
-              {tournament.status}
-            </span>
+          <div className="relative">
+            <div className="flex flex-wrap items-center gap-3">
+              <StatusPill value={tournament.status} />
 
-            <span className="rounded-full border border-white/10 px-4 py-1 text-xs font-bold text-white/60">
-              {tournament.format}
-            </span>
-          </div>
-
-          <h1 className="text-5xl font-black md:text-7xl">{tournament.name}</h1>
-
-          <p className="mt-6 max-w-3xl text-lg leading-8 text-white/60">
-            {tournament.description ?? "No description available."}
-          </p>
-
-          <div className="mt-10 grid gap-4 md:grid-cols-4">
-            <div className="rounded-3xl bg-black/30 p-5">
-              <Gamepad2 className="mb-3 text-cyan-400" />
-              <p className="text-sm text-white/50">Game</p>
-              <p className="font-black">{tournament.game}</p>
+              <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs font-black uppercase tracking-[0.12em] text-slate-200">
+                {tournament.format}
+              </span>
             </div>
 
-            <div className="rounded-3xl bg-black/30 p-5">
-              <Users className="mb-3 text-violet-400" />
-              <p className="text-sm text-white/50">Max Teams</p>
-              <p className="font-black">{tournament.maxTeams}</p>
-            </div>
+            <h1 className="mt-8 max-w-4xl text-4xl font-black leading-[0.95] text-white sm:text-6xl lg:text-7xl">
+              {formatTournamentName(tournament.name)}
+            </h1>
 
-            <div className="rounded-3xl bg-black/30 p-5">
-              <Trophy className="mb-3 text-yellow-300" />
-              <p className="text-sm text-white/50">Prize Pool</p>
-              <p className="font-black">{tournament.prizePool ?? "TBA"}</p>
-            </div>
+            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-300">
+              {tournament.description ?? "No description available."}
+            </p>
 
-            <div className="rounded-3xl bg-black/30 p-5">
-              <CalendarDays className="mb-3 text-rose-400" />
-              <p className="text-sm text-white/50">Start Date</p>
-              <p className="font-black">
-                {new Date(tournament.startDate).toLocaleDateString()}
-              </p>
+            <div className="mt-8 flex flex-wrap gap-3 text-sm font-bold text-slate-300">
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2">
+                <Gamepad2 className="size-4 text-cyan-200" />
+                {tournament.game}
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2">
+                <Users className="size-4 text-violet-200" />
+                {totalTeams}/{tournament.maxTeams} teams
+              </span>
+              {tournament.region && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2">
+                  <Shield className="size-4 text-emerald-200" />
+                  {tournament.region}
+                </span>
+              )}
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2">
+                <CalendarDays className="size-4 text-amber-200" />
+                {formatDate(tournament.startDate)}
+              </span>
+              {tournament.livestreamUrl && (
+                <a
+                  href={tournament.livestreamUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full border border-red-300/20 bg-red-300/10 px-4 py-2 text-red-100"
+                >
+                  <Video className="size-4" />
+                  Main stream
+                </a>
+              )}
             </div>
           </div>
         </section>
 
+        <section className="grid gap-4 md:grid-cols-4">
+          <MetricCard
+            icon={<Gamepad2 className="size-5" />}
+            label="Game"
+            value={tournament.game}
+            helper="competition title"
+            tone="cyan"
+          />
+          <MetricCard
+            icon={<Users className="size-5" />}
+            label="Teams"
+            value={`${totalTeams}/${tournament.maxTeams}`}
+            helper={`${tournament.teamSize} players each`}
+            tone="violet"
+          />
+          <MetricCard
+            icon={<Radio className="size-5" />}
+            label="Matches"
+            value={`${completedMatches}/${totalMatches}`}
+            helper="completed"
+            tone="red"
+          />
+          <MetricCard
+            icon={<CalendarDays className="size-5" />}
+            label="Start Date"
+            value={formatDate(tournament.startDate)}
+            helper="local display"
+            tone="amber"
+          />
+        </section>
+
+
         {tournament.status === "COMPLETED" && (
-          <section className="mt-8 rounded-[2rem] border border-amber-300/20 bg-amber-300/10 p-6">
+          <section className="rounded-[1.75rem] border border-amber-300/20 bg-amber-300/10 p-6 shadow-[0_24px_90px_rgba(251,191,36,0.08)]">
             <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
               <div>
                 <p className="text-sm font-black tracking-[0.25em] text-amber-200">
@@ -407,9 +742,9 @@ export function TournamentDetailPage() {
                 </h2>
               </div>
 
-              {tournament.completedAt && (
+              {completedAtLabel && (
                 <p className="text-sm font-bold text-white/55">
-                  Completed {new Date(tournament.completedAt).toLocaleString()}
+                  Completed {completedAtLabel}
                 </p>
               )}
             </div>
@@ -448,12 +783,11 @@ export function TournamentDetailPage() {
           </section>
         )}
 
-        <section className="mt-8 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6">
-          <div className="mb-6 flex items-center gap-3">
-            <Megaphone className="text-cyan-300" />
-            <h2 className="text-2xl font-black">Announcements</h2>
-          </div>
-
+        <PanelShell
+          icon={<Megaphone className="size-6" />}
+          title="Announcements"
+          description="Organizer updates, warnings and urgent notices for this tournament."
+        >
           {announcements.length === 0 ? (
             <EmptyState
               compact
@@ -471,27 +805,29 @@ export function TournamentDetailPage() {
                 return (
                   <article
                     key={announcement.id}
-                    className={`rounded-3xl border p-5 ${tone.wrapper}`}
+                    className={`rounded-[1.35rem] border p-5 shadow-[0_18px_70px_rgba(0,0,0,0.14)] ${tone.wrapper}`}
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="flex min-w-0 gap-3">
                         <Icon className={`mt-1 shrink-0 ${tone.icon}`} />
                         <div>
-                          <p className="font-black">{announcement.title}</p>
-                          <p className="mt-1 text-sm text-white/45">
-                            {new Date(announcement.createdAt).toLocaleString()}
+                          <p className="font-black text-white">
+                            {announcement.title}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-400">
+                            {formatDateTime(announcement.createdAt)}
                           </p>
                         </div>
                       </div>
 
                       <span
-                        className={`w-fit rounded-full px-3 py-1 text-xs font-black ${tone.label}`}
+                        className={`w-fit rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${tone.label}`}
                       >
                         {announcement.type}
                       </span>
                     </div>
 
-                    <p className="mt-4 whitespace-pre-line text-sm leading-6 text-white/70">
+                    <p className="mt-4 whitespace-pre-line text-sm leading-6 text-slate-300">
                       {announcement.content}
                     </p>
                   </article>
@@ -499,10 +835,10 @@ export function TournamentDetailPage() {
               })}
             </div>
           )}
-        </section>
+        </PanelShell>
 
-        <section className="mt-8 grid gap-8 lg:grid-cols-[1.3fr_0.7fr]">
-          <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl">
+        <section className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+          <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.24)] backdrop-blur-2xl sm:p-6">
             <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex items-center gap-3">
                 {activeTab === "BRACKET" ? (
@@ -513,16 +849,24 @@ export function TournamentDetailPage() {
                 <h2 className="text-2xl font-black">
                   {activeTab === "BRACKET" ? "Live Bracket" : "Leaderboard"}
                 </h2>
+                {activeTab === "BRACKET" && bracket?.status && (
+                  <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 sm:flex">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                      Bracket
+                    </span>
+                    <StatusPill value={bracket.status} />
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 rounded-2xl border border-white/10 bg-black/30 p-1 text-sm font-black">
+              <div className="grid grid-cols-2 rounded-2xl border border-white/10 bg-black/25 p-1 text-sm font-black">
                 <button
                   type="button"
                   onClick={() => setActiveTab("BRACKET")}
                   className={`rounded-xl px-4 py-2 ${
                     activeTab === "BRACKET"
-                      ? "bg-cyan-400 text-black"
-                      : "text-white/55 hover:text-white"
+                      ? "bg-cyan-300 text-slate-950"
+                      : "text-slate-400 hover:text-white"
                   }`}
                 >
                   Bracket
@@ -532,8 +876,8 @@ export function TournamentDetailPage() {
                   onClick={() => setActiveTab("LEADERBOARD")}
                   className={`rounded-xl px-4 py-2 ${
                     activeTab === "LEADERBOARD"
-                      ? "bg-amber-300 text-black"
-                      : "text-white/55 hover:text-white"
+                      ? "bg-amber-300 text-slate-950"
+                      : "text-slate-400 hover:text-white"
                   }`}
                 >
                   Leaderboard
@@ -541,7 +885,7 @@ export function TournamentDetailPage() {
               </div>
             </div>
 
-            {activeTab === "BRACKET" && !bracket ? (
+            {activeTab === "BRACKET" && bracketMatches.length === 0 ? (
               <EmptyState
                 compact
                 icon={Radio}
@@ -549,33 +893,37 @@ export function TournamentDetailPage() {
                 description="Once the organizer generates matches, the live bracket will appear here."
               />
             ) : activeTab === "BRACKET" ? (
-              <div className="grid gap-5 md:grid-cols-3">
-                {(bracket?.matches ?? []).map((match) => (
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {bracketMatches.map((match) => (
                   <div
                     key={match.id}
-                    className="rounded-3xl border border-white/10 bg-black/30 p-5"
+                    className="rounded-[1.35rem] border border-white/10 bg-black/25 p-5 shadow-[0_18px_70px_rgba(0,0,0,0.16)]"
                   >
                     <p className="mb-4 text-xs font-bold text-white/40">
-                      ROUND {match.roundNumber} • MATCH {match.matchNumber}
+                      ROUND {match.roundNumber} / MATCH {match.matchNumber}
                     </p>
 
-                    <div className="rounded-2xl border border-cyan-400/40 bg-cyan-400/10 p-4">
-                      <p className="font-bold">{match.teamAId ?? "TBD"}</p>
+                    <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4">
+                      <p className="font-bold text-white">
+                        {getTeamLabel(match.teamAId)}
+                      </p>
                     </div>
 
                     <p className="my-3 text-center text-xs font-black text-white/40">
                       VS
                     </p>
 
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                      <p className="font-bold">{match.teamBId ?? "TBD"}</p>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+                      <p className="font-bold text-white">
+                        {getTeamLabel(match.teamBId)}
+                      </p>
                     </div>
 
-                    <div className="mt-4 rounded-2xl bg-white/5 p-3 text-center">
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.055] p-3 text-center">
                       <p className="font-black text-cyan-300">
                         {match.status === "COMPLETED"
                           ? `${match.scoreA} - ${match.scoreB}`
-                          : match.status}
+                          : formatStatus(match.status)}
                       </p>
                     </div>
 
@@ -584,7 +932,7 @@ export function TournamentDetailPage() {
                         Time:{" "}
                         <span className="font-bold text-white">
                           {match.scheduledAt
-                            ? new Date(match.scheduledAt).toLocaleString()
+                            ? formatDateTime(match.scheduledAt)
                             : "TBA"}
                         </span>
                       </p>
@@ -594,13 +942,12 @@ export function TournamentDetailPage() {
                           {match.roomCode ?? "TBA"}
                         </span>
                       </p>
-                      {match.status === "IN_PROGRESS" &&
-                      match.livestreamUrl ? (
+                      {match.status === "IN_PROGRESS" && match.livestreamUrl ? (
                         <a
                           href={match.livestreamUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-red-400 px-4 py-2 font-black text-black hover:bg-red-300"
+                          className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-red-300 px-4 py-2 font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-red-200"
                         >
                           <Video size={16} />
                           Watch Live
@@ -622,7 +969,7 @@ export function TournamentDetailPage() {
 
                     <Link
                       to={`/matches/${match.id}`}
-                      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2 text-sm font-black text-black hover:bg-cyan-300"
+                      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-2 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-cyan-200"
                     >
                       <Radio size={16} />
                       Open Match Room
@@ -639,9 +986,9 @@ export function TournamentDetailPage() {
               />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] border-separate border-spacing-y-3 text-left">
+                <table className="w-full min-w-[780px] border-separate border-spacing-y-3 text-left">
                   <thead>
-                    <tr className="text-xs uppercase tracking-[0.2em] text-white/40">
+                    <tr className="text-xs uppercase tracking-[0.18em] text-slate-500">
                       <th className="px-4">Rank</th>
                       <th className="px-4">Team</th>
                       <th className="px-4">Played</th>
@@ -652,28 +999,28 @@ export function TournamentDetailPage() {
                   </thead>
                   <tbody>
                     {leaderboard.map((row) => (
-                      <tr key={row.teamId} className="bg-black/30">
-                        <td className="rounded-l-2xl px-4 py-4">
-                          <span className="inline-flex items-center gap-2 rounded-full bg-amber-300/15 px-3 py-1 font-black text-amber-200">
+                      <tr key={row.teamId} className="bg-black/25">
+                        <td className="rounded-l-2xl border-y border-l border-white/10 px-4 py-4">
+                          <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 font-black text-amber-100">
                             <Medal size={16} /> #{row.rank}
                           </span>
                         </td>
-                        <td className="px-4 py-4">
-                          <p className="font-black">{row.teamName}</p>
-                          <p className="mt-1 text-xs text-white/40">
-                            Highest #{row.highestRank} - {row.winRate}% win rate
+                        <td className="border-y border-white/10 px-4 py-4">
+                          <p className="font-black text-white">{row.teamName}</p>
+                          <p className="mt-1 text-xs font-bold text-slate-500">
+                            Highest #{row.highestRank} / {row.winRate}% win rate
                           </p>
                         </td>
-                        <td className="px-4 py-4 font-bold">
+                        <td className="border-y border-white/10 px-4 py-4 font-bold">
                           {row.matchesPlayed}
                         </td>
-                        <td className="px-4 py-4 font-bold text-emerald-300">
+                        <td className="border-y border-white/10 px-4 py-4 font-bold text-emerald-300">
                           {row.wins}
                         </td>
-                        <td className="px-4 py-4 font-bold text-red-300">
+                        <td className="border-y border-white/10 px-4 py-4 font-bold text-red-300">
                           {row.losses}
                         </td>
-                        <td className="rounded-r-2xl px-4 py-4 text-xl font-black text-cyan-300">
+                        <td className="rounded-r-2xl border-y border-r border-white/10 px-4 py-4 text-xl font-black text-cyan-300">
                           {row.points}
                         </td>
                       </tr>
@@ -684,21 +1031,50 @@ export function TournamentDetailPage() {
             )}
           </div>
 
-          <aside className="rounded-[2rem] border border-cyan-400/20 bg-cyan-400/10 p-6 backdrop-blur-xl">
-            <Shield className="mb-5 text-cyan-300" />
+          <aside className="rounded-[1.75rem] border border-cyan-300/20 bg-cyan-300/10 p-6 shadow-[0_24px_90px_rgba(34,211,238,0.1)] backdrop-blur-2xl">
+            <Shield className="mb-5 text-cyan-200" />
             <h2 className="text-2xl font-black">Tournament Rules</h2>
 
-            <p className="mt-6 text-white/65">
+            <p className="mt-6 whitespace-pre-line text-sm leading-7 text-slate-300">
               {tournament.rules ?? "No rules provided."}
             </p>
 
+            {registrationStatusLoading ? (
+              <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex items-center gap-2 text-sm font-bold text-slate-300">
+                  <Loader2 className="size-4 animate-spin" />
+                  Checking lineup status...
+                </div>
+              </div>
+            ) : myRegistration ? (
+              <div className="mt-6 rounded-2xl border border-white/10 bg-black/25 p-4">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                  Your lineup
+                </p>
+                <div className="mt-3">
+                  <StatusPill value={myRegistration.status} />
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-300">
+                  {getRegistrationStatusMessage(myRegistration.status)}
+                </p>
+                {myRegistration.rejectReason && (
+                  <p className="mt-3 rounded-xl border border-red-300/20 bg-red-300/10 p-3 text-sm leading-6 text-red-100">
+                    {myRegistration.rejectReason}
+                  </p>
+                )}
+              </div>
+            ) : null}
+
             <button
+              type="button"
               onClick={handleOpenRegisterModal}
-              disabled={loadingAction === "register" || !canRegister}
-              className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 py-3 font-bold text-black hover:bg-cyan-300 disabled:opacity-50"
+              disabled={
+                loadingAction === "register" || !canRegister || !!myRegistration
+              }
+              className="mt-8 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 shadow-[0_18px_55px_rgba(103,232,249,0.18)] transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
             >
               {loadingAction === "register" && (
-                <Loader2 size={18} className="animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
               )}
               {registerButtonLabel}
             </button>
@@ -715,14 +1091,14 @@ export function TournamentDetailPage() {
             className="absolute inset-0 bg-black/70 backdrop-blur-md"
           />
 
-          <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[1.75rem] border border-white/10 bg-[#0f172a] p-6 shadow-2xl">
+          <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[1.75rem] border border-white/10 bg-[#0b1220] p-6 shadow-[0_28px_110px_rgba(0,0,0,0.5)]">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-bold tracking-[0.25em] text-cyan-400">
+                <p className="text-sm font-black uppercase tracking-[0.22em] text-cyan-200">
                   TEAM LINEUP
                 </p>
                 <h2 className="mt-2 text-3xl font-black">Register Team</h2>
-                <p className="mt-2 text-sm text-white/55">
+                <p className="mt-2 text-sm leading-6 text-slate-400">
                   Choose exactly {tournament.teamSize} main players. Substitutes
                   are optional.
                 </p>
@@ -731,7 +1107,7 @@ export function TournamentDetailPage() {
               <button
                 type="button"
                 onClick={() => setRegisterModalOpen(false)}
-                className="flex size-10 shrink-0 items-center justify-center rounded-xl text-white/50 hover:bg-white/10 hover:text-white"
+                className="flex size-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-white/10 hover:text-white"
               >
                 <X size={18} />
               </button>
@@ -752,9 +1128,9 @@ export function TournamentDetailPage() {
               />
             ) : (
               <>
-                <div className="mb-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4">
+                <div className="mb-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4">
                   <p className="font-black text-cyan-100">{team.name}</p>
-                  <p className="mt-1 text-sm text-white/55">
+                  <p className="mt-1 text-sm text-slate-400">
                     Captain: {team.captain.username}
                   </p>
                 </div>
@@ -768,16 +1144,18 @@ export function TournamentDetailPage() {
                     return (
                       <div
                         key={member.id}
-                        className="grid gap-3 rounded-2xl bg-black/30 p-4 md:grid-cols-[1fr_auto_auto]"
+                        className="grid gap-3 rounded-2xl border border-white/10 bg-black/25 p-4 md:grid-cols-[1fr_auto_auto]"
                       >
                         <div>
-                          <p className="font-black">{member.user.username}</p>
-                          <p className="text-sm text-white/50">
+                          <p className="font-black text-white">
+                            {member.user.username}
+                          </p>
+                          <p className="text-sm text-slate-400">
                             {member.user.email}
                           </p>
                         </div>
 
-                        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-white/70 hover:bg-white/10">
+                        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm font-bold text-cyan-100 hover:bg-cyan-300/20">
                           <input
                             type="checkbox"
                             checked={isMain}
@@ -787,7 +1165,7 @@ export function TournamentDetailPage() {
                           Main
                         </label>
 
-                        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-white/70 hover:bg-white/10">
+                        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-300/10 px-4 py-2 text-sm font-bold text-violet-100 hover:bg-violet-300/20">
                           <input
                             type="checkbox"
                             checked={isSub}
@@ -803,19 +1181,19 @@ export function TournamentDetailPage() {
                 </div>
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm font-bold text-white/60">
-                    Main {mainPlayerIds.length}/{tournament.teamSize} · Substitute{" "}
-                    {substituteIds.length}
+                  <p className="text-sm font-bold text-slate-400">
+                    Main {mainPlayerIds.length}/{tournament.teamSize} /
+                    Substitute {substituteIds.length}
                   </p>
 
                   <button
                     type="button"
                     onClick={handleRegisterTeam}
                     disabled={loadingAction === "register"}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-cyan-400 px-5 py-3 font-black text-black hover:bg-cyan-300 disabled:opacity-50"
+                    className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:opacity-50 disabled:hover:translate-y-0"
                   >
                     {loadingAction === "register" && (
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 className="size-4 animate-spin" />
                     )}
                     Submit Lineup
                   </button>

@@ -56,16 +56,22 @@ export function clearAuthStorage(options: { notify?: boolean } = {}) {
 }
 
 function shouldSkipRefresh(url?: string) {
-  return ["/auth/login", "/auth/register", "/auth/refresh"].some((path) =>
-    url?.includes(path),
-  );
+  return [
+    "/auth/login",
+    "/auth/google",
+    "/auth/forgot-password",
+    "/auth/verify-reset-otp",
+    "/auth/reset-password",
+    "/auth/register",
+    "/auth/refresh-token",
+  ].some((path) => url?.includes(path));
 }
 
 async function refreshAccessToken(refreshToken: string) {
   if (!refreshRequest) {
     refreshRequest = axios
       .post<RefreshResponse>(
-        `${API_BASE_URL}/auth/refresh`,
+        `${API_BASE_URL}/auth/refresh-token`,
         {},
         {
           headers: {

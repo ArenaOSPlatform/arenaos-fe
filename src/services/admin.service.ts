@@ -91,6 +91,10 @@ export type AdminTournament = {
 export type AdminOrganizerRequest = {
   id: string;
   userId: string;
+  organizationName: string | null;
+  contactEmail: string | null;
+  socialLink: string | null;
+  evidenceUrl: string | null;
   reason: string | null;
   experience: string | null;
   portfolioUrl: string | null;

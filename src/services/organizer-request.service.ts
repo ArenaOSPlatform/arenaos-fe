@@ -3,6 +3,10 @@ import { api } from "./api";
 export type OrganizerRequest = {
   id: string;
   userId: string;
+  organizationName: string | null;
+  contactEmail: string | null;
+  socialLink: string | null;
+  evidenceUrl: string | null;
   reason: string | null;
   experience: string | null;
   portfolioUrl: string | null;
@@ -20,6 +24,10 @@ type ApiResponse<T> = {
 };
 
 export type CreateOrganizerRequestPayload = {
+  organizationName?: string;
+  contactEmail?: string;
+  socialLink?: string;
+  evidenceUrl?: string;
   reason?: string;
   experience?: string;
   portfolioUrl?: string;
