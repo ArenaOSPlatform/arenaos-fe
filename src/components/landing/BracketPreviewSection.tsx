@@ -48,12 +48,22 @@ function TeamSlot({ name, active }: { name: string | null; active: boolean }) {
     >
       {active && (
         <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-cyan-300 text-slate-950 shadow-[0_0_12px_rgba(34,211,238,0.5)]">
-          <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
+          <svg
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            className="size-3"
+            aria-hidden="true"
+          >
             <path d="M8 1l1.88 3.81 4.2.61-3.04 2.96.72 4.18L8 10.4l-3.76 1.98.72-4.18L1.92 5.42l4.2-.61z" />
           </svg>
         </span>
       )}
-      <p className={["truncate font-bold", active ? "text-white" : "text-slate-300"].join(" ")}>
+      <p
+        className={[
+          "truncate font-bold",
+          active ? "text-white" : "text-slate-300",
+        ].join(" ")}
+      >
         {name ? formatTournamentName(name) : "TBD"}
       </p>
     </div>
@@ -130,7 +140,16 @@ function MatchCard({
         </p>
         {isCompleted && (
           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-300">
-            <svg viewBox="0 0 12 12" fill="currentColor" className="size-2.5"><path d="M10 3L5 8.5 2 5.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <svg viewBox="0 0 12 12" fill="currentColor" className="size-2.5">
+              <path
+                d="M10 3L5 8.5 2 5.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
             Done
           </span>
         )}
@@ -186,7 +205,7 @@ function CurrentMatchPanel({ currentMatch }: { currentMatch?: Match }) {
           value={
             currentMatch
               ? `${formatTournamentName(currentMatch.left ?? "TBD")} vs ${formatTournamentName(
-                  currentMatch.right ?? "TBD"
+                  currentMatch.right ?? "TBD",
                 )}`
               : "No active match"
           }
@@ -256,11 +275,10 @@ export function BracketPreviewSection({
           <p className="inline-flex rounded-full border border-violet-300/20 bg-violet-300/10 px-4 py-2 text-xs font-black uppercase tracking-[0.28em] text-violet-200 backdrop-blur-xl">
             BRACKET ENGINE
           </p>
-
           <h2 className="font-display mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
             Realtime tournament bracket updates
           </h2>
-
+          // Description of the bracket preview functionality
           <p className="mt-5 max-w-2xl text-base leading-8 text-slate-300 md:text-lg">
             Winners automatically advance to the next round while every
             spectator sees the bracket update live without refreshing the page.
@@ -287,7 +305,9 @@ export function BracketPreviewSection({
                 <h3 className="text-xl font-black tracking-[-0.02em] text-white sm:text-2xl">
                   {loading
                     ? "Loading bracket..."
-                    : (bracket?.tournament.name ? formatTournamentName(bracket.tournament.name) : "No bracket generated yet")}
+                    : bracket?.tournament.name
+                      ? formatTournamentName(bracket.tournament.name)
+                      : "No bracket generated yet"}
                 </h3>
 
                 <p className="mt-1 text-sm leading-6 text-slate-400">
