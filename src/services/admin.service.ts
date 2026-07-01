@@ -162,6 +162,21 @@ export type AdminAuditLog = {
   createdAt: string;
 };
 
+export type AdminIntegrationDeliveryLog = {
+  id: string;
+  provider: string;
+  eventType: string;
+  status: string;
+  recipient: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  providerStatus: number | null;
+  providerMessageId: string | null;
+  error: string | null;
+  metadata: string | null;
+  createdAt: string;
+};
+
 type ApiResponse<T> = {
   message: string;
   data: T;
@@ -241,6 +256,13 @@ export async function getAdminAuditLogs(): Promise<
   ApiResponse<AdminAuditLog[]>
 > {
   const res = await api.get("/admin/audit-logs");
+  return res.data;
+}
+
+export async function getAdminIntegrationDeliveryLogs(): Promise<
+  ApiResponse<AdminIntegrationDeliveryLog[]>
+> {
+  const res = await api.get("/admin/integration-deliveries");
   return res.data;
 }
 

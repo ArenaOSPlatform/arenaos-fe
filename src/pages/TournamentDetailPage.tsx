@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -25,14 +25,15 @@ import {
   type TournamentAnnouncement,
   type TournamentLeaderboardRow,
 } from "@/services/tournament.service";
-import { getMyTeam } from "@/services/team.service";
+import { getMyTeams } from "@/services/team.service";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { BackButton } from "@/components/ui/BackButton";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useToast } from "@/hooks/useToast";
-import { socket } from "@/sockets/socket";
+import { connectSocket, socket } from "@/sockets/socket";
 import { formatTournamentName } from "@/utils";
+import { getAccessToken } from "@/utils/authStorage";
 
 function getApiErrorMessage(error: unknown, fallback: string) {
   if (typeof error === "object" && error !== null && "response" in error) {
@@ -87,7 +88,6 @@ type Match = {
   winnerId: string | null;
   status: string;
   scheduledAt: string | null;
-  roomCode: string | null;
   livestreamUrl: string | null;
 };
 
@@ -111,6 +111,8 @@ type TeamMember = {
 type Team = {
   id: string;
   name: string;
+  game: string | null;
+  region: string | null;
   captain: {
     id: string;
     username: string;
@@ -171,11 +173,30 @@ const toneClasses: Record<Tone, string> = {
 };
 
 function getStatusTone(status: string): Tone {
-  if (["APPROVED", "OPEN_REGISTRATION", "IN_PROGRESS", "COMPLETED"].includes(status)) {
+  if (
+    [
+      "APPROVED",
+      "OPEN_REGISTRATION",
+      "ONGOING",
+      "LIVE",
+      "IN_PROGRESS",
+      "COMPLETED",
+    ].includes(status)
+  ) {
     return "emerald";
   }
 
-  if (["PENDING", "PENDING_APPROVAL", "MATCH_SCHEDULED"].includes(status)) {
+  if (
+    [
+      "PENDING",
+      "PENDING_APPROVAL",
+      "PENDING_SCHEDULE",
+      "SCHEDULED",
+      "MATCH_SCHEDULED",
+      "CHECK_IN_OPEN",
+      "WAITING_CONFIRMATION",
+    ].includes(status)
+  ) {
     return "amber";
   }
 
@@ -352,13 +373,20 @@ export function TournamentDetailPage() {
   const [announcements, setAnnouncements] = useState<TournamentAnnouncement[]>(
     [],
   );
-  const [activeTab, setActiveTab] =
-    useState<TournamentDetailTab>(routeDefaultTab);
+  const [tabOverride, setTabOverride] = useState<{
+    pathname: string;
+    tab: TournamentDetailTab;
+  } | null>(null);
+  const activeTab =
+    tabOverride?.pathname === location.pathname
+      ? tabOverride.tab
+      : routeDefaultTab;
   const [pageError, setPageError] = useState("");
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [lineupLoading, setLineupLoading] = useState(false);
   const [team, setTeam] = useState<Team | null>(null);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [myRegistration, setMyRegistration] =
     useState<TournamentRegistration | null>(null);
   const [registrationStatusLoading, setRegistrationStatusLoading] =
@@ -367,36 +395,13 @@ export function TournamentDetailPage() {
   const [substituteIds, setSubstituteIds] = useState<string[]>([]);
   const requiredLineupSize = tournament?.teamSize ?? 0;
 
-  async function fetchData(tournamentId: string) {
-    const tournamentRes = await getTournamentById(tournamentId);
-    setTournament(tournamentRes.data);
-
-    try {
-      const bracketRes = await getTournamentBracket(tournamentId);
-      setBracket(bracketRes.data);
-    } catch {
-      setBracket(null);
-    }
-
-    try {
-      const leaderboardRes = await getTournamentLeaderboard(tournamentId);
-      setLeaderboard(leaderboardRes.data);
-    } catch {
-      setLeaderboard([]);
-    }
-
-    try {
-      const announcementRes = await getTournamentAnnouncements(tournamentId);
-      setAnnouncements(announcementRes.data);
-    } catch {
-      setAnnouncements([]);
-    }
-
-    void loadMyRegistration(tournamentId);
-  }
-
-  async function loadMyRegistration(tournamentId: string) {
-    if (!localStorage.getItem("accessToken")) {
+  const loadMyRegistration = useCallback(async (
+    tournamentId: string,
+    currentTournament: Tournament,
+  ) => {
+    if (!getAccessToken()) {
+      setTeams([]);
+      setTeam(null);
       setMyRegistration(null);
       return;
     }
@@ -404,34 +409,77 @@ export function TournamentDetailPage() {
     try {
       setRegistrationStatusLoading(true);
 
-      const [teamRes, registrationsRes] = await Promise.all([
-        getMyTeam(),
+      const [teamsRes, registrationsRes] = await Promise.all([
+        getMyTeams(),
         getTournamentRegistrations(tournamentId),
       ]);
-      const currentTeam = teamRes.data as Team | null;
-
-      setTeam(currentTeam);
+      const userTeams = (teamsRes.data ?? []) as Team[];
 
       const registrations = (registrationsRes.data ??
         []) as TournamentRegistration[];
-      const registration =
-        currentTeam &&
-        registrations.find(
-          (item) =>
-            item.teamId === currentTeam.id || item.team?.id === currentTeam.id,
-        );
+      const registration = registrations.find((item) =>
+        userTeams.some(
+          (userTeam) =>
+            item.teamId === userTeam.id || item.team?.id === userTeam.id,
+        ),
+      );
+      const registeredTeam = registration
+        ? userTeams.find(
+            (userTeam) =>
+              registration.teamId === userTeam.id ||
+              registration.team?.id === userTeam.id,
+          )
+        : null;
+      const matchingGameTeam = userTeams.find(
+        (userTeam) =>
+          userTeam.game?.trim().toLowerCase() ===
+          currentTournament.game.trim().toLowerCase(),
+      );
+      const currentTeam =
+        registeredTeam ?? matchingGameTeam ?? userTeams[0] ?? null;
 
+      setTeams(userTeams);
+      setTeam(currentTeam);
       setMyRegistration(registration || null);
     } catch {
+      setTeams([]);
+      setTeam(null);
       setMyRegistration(null);
     } finally {
       setRegistrationStatusLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => {
-    setActiveTab(routeDefaultTab);
-  }, [routeDefaultTab]);
+  const fetchData = useCallback(
+    async (tournamentId: string) => {
+      const tournamentRes = await getTournamentById(tournamentId);
+      setTournament(tournamentRes.data);
+
+      try {
+        const bracketRes = await getTournamentBracket(tournamentId);
+        setBracket(bracketRes.data);
+      } catch {
+        setBracket(null);
+      }
+
+      try {
+        const leaderboardRes = await getTournamentLeaderboard(tournamentId);
+        setLeaderboard(leaderboardRes.data);
+      } catch {
+        setLeaderboard([]);
+      }
+
+      try {
+        const announcementRes = await getTournamentAnnouncements(tournamentId);
+        setAnnouncements(announcementRes.data);
+      } catch {
+        setAnnouncements([]);
+      }
+
+      void loadMyRegistration(tournamentId, tournamentRes.data);
+    },
+    [loadMyRegistration],
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -455,12 +503,13 @@ export function TournamentDetailPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [id, toast]);
+  }, [fetchData, id, toast]);
 
   useEffect(() => {
     if (!id) return;
 
-    if (!socket.connected) socket.connect();
+    if (!connectSocket()) return;
+
     socket.emit("join:tournament", id);
 
     const refreshTournament = () => {
@@ -480,7 +529,7 @@ export function TournamentDetailPage() {
       socket.off("bracket:updated", refreshTournament);
       socket.off("leaderboard:updated", refreshTournament);
     };
-  }, [id]);
+  }, [fetchData, id]);
 
   async function handleOpenRegisterModal() {
     if (!id) return;
@@ -496,8 +545,19 @@ export function TournamentDetailPage() {
 
     try {
       setLineupLoading(true);
-      const res = await getMyTeam();
-      setTeam(res.data);
+      const res = await getMyTeams();
+      const userTeams = (res.data ?? []) as Team[];
+      const currentTeam =
+        userTeams.find(
+          (userTeam) =>
+            userTeam.game?.trim().toLowerCase() ===
+            tournament?.game.trim().toLowerCase(),
+        ) ??
+        userTeams[0] ??
+        null;
+
+      setTeams(userTeams);
+      setTeam(currentTeam);
     } catch (err) {
       toast.error(
         getApiErrorMessage(
@@ -508,6 +568,14 @@ export function TournamentDetailPage() {
     } finally {
       setLineupLoading(false);
     }
+  }
+
+  function handleSelectRegistrationTeam(nextTeam: Team) {
+    if (nextTeam.id === team?.id) return;
+
+    setTeam(nextTeam);
+    setMainPlayerIds([]);
+    setSubstituteIds([]);
   }
 
   function toggleMainPlayer(playerId: string) {
@@ -549,6 +617,11 @@ export function TournamentDetailPage() {
       return;
     }
 
+    if (!team) {
+      toast.warning("Choose a team before registering.");
+      return;
+    }
+
     if (mainPlayerIds.length !== requiredLineupSize) {
       toast.warning(`Choose exactly ${requiredLineupSize} main players.`);
       return;
@@ -567,6 +640,7 @@ export function TournamentDetailPage() {
       setLoadingAction("register");
 
       const res = await registerTeamToTournament(id, {
+        teamId: team.id,
         mainPlayerIds,
         substituteIds,
       });
@@ -862,7 +936,12 @@ export function TournamentDetailPage() {
               <div className="grid grid-cols-2 rounded-2xl border border-white/10 bg-black/25 p-1 text-sm font-black">
                 <button
                   type="button"
-                  onClick={() => setActiveTab("BRACKET")}
+                  onClick={() =>
+                    setTabOverride({
+                      pathname: location.pathname,
+                      tab: "BRACKET",
+                    })
+                  }
                   className={`rounded-xl px-4 py-2 ${
                     activeTab === "BRACKET"
                       ? "bg-cyan-300 text-slate-950"
@@ -873,7 +952,12 @@ export function TournamentDetailPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab("LEADERBOARD")}
+                  onClick={() =>
+                    setTabOverride({
+                      pathname: location.pathname,
+                      tab: "LEADERBOARD",
+                    })
+                  }
                   className={`rounded-xl px-4 py-2 ${
                     activeTab === "LEADERBOARD"
                       ? "bg-amber-300 text-slate-950"
@@ -939,10 +1023,12 @@ export function TournamentDetailPage() {
                       <p className="text-white/55">
                         Room:{" "}
                         <span className="font-bold text-white">
-                          {match.roomCode ?? "TBA"}
+                          Private match room
                         </span>
                       </p>
-                      {match.status === "IN_PROGRESS" && match.livestreamUrl ? (
+                      {(match.status === "LIVE" ||
+                        match.status === "IN_PROGRESS") &&
+                      match.livestreamUrl ? (
                         <a
                           href={match.livestreamUrl}
                           target="_blank"
@@ -1128,6 +1214,41 @@ export function TournamentDetailPage() {
               />
             ) : (
               <>
+                {teams.length > 1 && (
+                  <div className="mb-5 rounded-2xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
+                      Choose team
+                    </p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      {teams.map((item) => {
+                        const isSelected = item.id === team.id;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => handleSelectRegistrationTeam(item)}
+                            className={[
+                              "rounded-2xl border px-4 py-3 text-left transition",
+                              isSelected
+                                ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+                                : "border-white/10 bg-white/[0.04] text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/10",
+                            ].join(" ")}
+                          >
+                            <span className="block truncate font-black">
+                              {item.name}
+                            </span>
+                            <span className="mt-1 block truncate text-xs text-slate-500">
+                              {item.game ?? "No game"} -{" "}
+                              {item.region ?? "No region"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="mb-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4">
                   <p className="font-black text-cyan-100">{team.name}</p>
                   <p className="mt-1 text-sm text-slate-400">

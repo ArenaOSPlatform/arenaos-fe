@@ -40,6 +40,16 @@ function formatStatus(status: string) {
   return status.replaceAll("_", " ");
 }
 
+function isLiveStatus(status: string) {
+  return ["ONGOING", "LIVE", "IN_PROGRESS"].includes(status);
+}
+
+function StatusColorGlow(status: string): string {
+  if (isLiveStatus(status)) return "hover:border-red-300/40 hover:shadow-[0_28px_80px_rgba(248,113,113,0.12)]";
+  if (status === "OPEN_REGISTRATION") return "hover:border-emerald-300/40 hover:shadow-[0_28px_80px_rgba(52,211,153,0.10)]";
+  return "hover:border-cyan-300/50 hover:shadow-[0_28px_80px_rgba(34,211,238,0.08)]";
+}
+
 function EmptyTournamentState() {
   return (
     <div className="rounded-[2rem] border border-white/10 bg-white/[0.045] p-8 text-center shadow-[0_24px_80px_rgba(0,0,0,0.25)] backdrop-blur-2xl">
@@ -115,6 +125,9 @@ function TournamentCard({
   index: number;
   reduceMotion: boolean | null;
 }) {
+  const live = isLiveStatus(item.status);
+  const glowClass = StatusColorGlow(item.status);
+
   return (
     <motion.article
       initial={
@@ -129,15 +142,23 @@ function TournamentCard({
         ease: UI.motion.ease,
       }}
       viewport={{ once: true, margin: "-90px" }}
-      className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.045] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.25)] backdrop-blur-2xl transition duration-300 hover:-translate-y-2 hover:border-cyan-300/50 hover:bg-white/[0.07]"
+      className={`group relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.045] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.25)] backdrop-blur-2xl transition duration-300 hover:-translate-y-2 hover:bg-white/[0.07] ${glowClass}`}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
       <div className="pointer-events-none absolute -right-16 -top-16 size-44 rounded-full bg-cyan-300/10 blur-3xl opacity-0 transition duration-300 group-hover:opacity-100" />
 
       <div className="relative mb-8 flex items-center justify-between gap-4">
-        <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] text-cyan-200">
-          {formatStatus(item.status)}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] text-cyan-200">
+            {formatStatus(item.status)}
+          </span>
+          {live && (
+            <span className="flex items-center gap-1.5 rounded-full border border-red-300/30 bg-red-300/10 px-2.5 py-1 text-xs font-black text-red-200">
+              <span className="arena-live-dot size-2 rounded-full bg-red-300" />
+              LIVE
+            </span>
+          )}
+        </div>
 
         <div className="flex size-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
           <Radio className="size-5" aria-hidden="true" />
@@ -204,7 +225,7 @@ export function LiveTournamentsSection({
               LIVE ARENA
             </p>
 
-            <h2 className="mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
+            <h2 className="font-display mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
               Active Tournaments
             </h2>
           </div>

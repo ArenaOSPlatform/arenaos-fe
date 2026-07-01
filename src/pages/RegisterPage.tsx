@@ -15,16 +15,33 @@ import {
 import { type FormEvent, useState } from "react";
 import { register } from "@/services/auth.service";
 import { useToast } from "@/hooks/useToast";
-import {
-  clearStoredUserRole,
-  getAccessTokenRole,
-  isUserRole,
-  roleHomePath,
-  setStoredUserRole,
-} from "@/routes/route-role";
+import { clearStoredUserRole } from "@/routes/route-role";
+import { clearStoredTokens } from "@/utils/authStorage";
 
 function getEmailLooksValid(value: string) {
   return /^\S+@\S+\.\S+$/.test(value.trim());
+}
+
+function getPasswordLooksStrong(value: string) {
+  return (
+    value.length >= 8 &&
+    /[a-z]/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /\d/.test(value) &&
+    /[^\sA-Za-z0-9]/.test(value)
+  );
+}
+
+function getPasswordRequirementLabel(value: string) {
+  const missing = [];
+
+  if (value.length < 8) missing.push("8+ chars");
+  if (!/[A-Z]/.test(value)) missing.push("A-Z");
+  if (!/[a-z]/.test(value)) missing.push("a-z");
+  if (!/\d/.test(value)) missing.push("0-9");
+  if (!/[^\sA-Za-z0-9]/.test(value)) missing.push("symbol");
+
+  return missing.join(", ");
 }
 
 function getApiErrorMessage(error: unknown, fallback: string) {
@@ -54,14 +71,14 @@ export function RegisterPage() {
 
   const usernameReady = username.trim().length >= 3;
   const emailReady = getEmailLooksValid(email);
-  const passwordReady = password.trim().length >= 6;
+  const passwordReady = getPasswordLooksStrong(password);
   const formReady = usernameReady && emailReady && passwordReady;
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!usernameReady) {
-      toast.warning("Username must be at least 3 characters.");
+      toast.warning("Full name must be at least 3 characters.");
       return;
     }
 
@@ -71,38 +88,25 @@ export function RegisterPage() {
     }
 
     if (!passwordReady) {
-      toast.warning("Password must be at least 6 characters.");
+      toast.warning(
+        "Password needs 8+ characters with uppercase, lowercase, number, and symbol.",
+      );
       return;
     }
 
     try {
       setLoading(true);
 
-      const res = await register({
+      await register({
         username: username.trim(),
         email: email.trim().toLowerCase(),
         password,
       });
 
-      localStorage.setItem("accessToken", res.data.accessToken);
-      localStorage.setItem("refreshToken", res.data.refreshToken);
-
-      const roleFromResponse = res.data.user?.role ?? res.data.role;
-      const role = isUserRole(roleFromResponse)
-        ? roleFromResponse
-        : getAccessTokenRole(res.data.accessToken);
-
-      if (!role) {
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("refreshToken");
-        clearStoredUserRole();
-        toast.error("Invalid account role");
-        return;
-      }
-
-      setStoredUserRole(role);
-      toast.success("Account created successfully.");
-      navigate(roleHomePath[role]);
+      clearStoredTokens();
+      clearStoredUserRole();
+      toast.success("Account created successfully. Please login to continue.");
+      navigate("/login", { replace: true });
     } catch (error) {
       toast.error(
         getApiErrorMessage(
@@ -182,7 +186,7 @@ export function RegisterPage() {
               <label className="block">
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <span className="text-sm font-black text-slate-300">
-                    Username
+                    Full Name
                   </span>
                   {username && (
                     <span
@@ -199,9 +203,9 @@ export function RegisterPage() {
                   <User className="size-5 text-cyan-300" aria-hidden="true" />
                   <input
                     type="text"
-                    placeholder="NovaPlayer"
+                    placeholder="Alex Nguyen"
                     value={username}
-                    autoComplete="username"
+                    autoComplete="name"
                     onChange={(event) => setUsername(event.target.value)}
                     className="w-full bg-transparent py-4 text-sm font-medium text-white outline-none placeholder:text-slate-600"
                   />
@@ -249,7 +253,9 @@ export function RegisterPage() {
                         passwordReady ? "text-emerald-200" : "text-amber-200",
                       ].join(" ")}
                     >
-                      {passwordReady ? "Ready" : "6+ chars"}
+                      {passwordReady
+                        ? "Strong"
+                        : getPasswordRequirementLabel(password)}
                     </span>
                   )}
                 </div>
@@ -260,7 +266,7 @@ export function RegisterPage() {
                   />
                   <input
                     type={showPassword ? "text" : "password"}
-                    placeholder="password"
+                    placeholder="Strong password"
                     value={password}
                     autoComplete="new-password"
                     onChange={(event) => setPassword(event.target.value)}
@@ -302,8 +308,8 @@ export function RegisterPage() {
 
               {!formReady && (
                 <p className="rounded-2xl border border-white/10 bg-black/20 p-3 text-center text-xs font-bold leading-5 text-slate-500">
-                  Username, email, and password must be ready before creating an
-                  account.
+                  Full name, email, and strong password must be ready before
+                  creating an account.
                 </p>
               )}
             </form>

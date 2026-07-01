@@ -1,6 +1,5 @@
 import { BracketPreviewSection } from "@/components/landing/BracketPreviewSection";
 import { CTASection } from "@/components/landing/CTASection";
-import { Hero3DScene } from "@/components/landing/Hero3DScene";
 import { LiveTournamentsSection } from "@/components/landing/LiveTournamentsSection";
 import { PlatformFeaturesSection } from "@/components/landing/PlatformFeaturesSection";
 import { TopTeamsSection } from "@/components/landing/TopTeamSection";
@@ -18,8 +17,14 @@ import {
   Trophy,
   Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+
+const Hero3DScene = lazy(() =>
+  import("@/components/landing/Hero3DScene").then((module) => ({
+    default: module.Hero3DScene,
+  })),
+);
 
 const heroContainerVariants: Variants = {
   hidden: {},
@@ -130,7 +135,11 @@ export function LandingPage() {
           />
         )}
 
-        <Hero3DScene />
+        {!shouldReduceMotion && (
+          <Suspense fallback={null}>
+            <Hero3DScene />
+          </Suspense>
+        )}
 
         <motion.div
           variants={heroContainerVariants}
@@ -143,10 +152,10 @@ export function LandingPage() {
               variants={heroItemVariants}
               className="mb-7 flex flex-wrap items-center gap-3"
             >
-              <span className="inline-flex items-center gap-3 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-black uppercase tracking-[0.24em] text-cyan-100 shadow-[0_0_50px_rgba(34,211,238,0.12)] backdrop-blur-xl">
+              <span className="inline-flex items-center gap-3 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-black uppercase tracking-[0.24em] text-cyan-100 shadow-[0_0_50px_rgba(34,211,238,0.16)] backdrop-blur-xl">
                 <span className="relative flex size-2.5">
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-cyan-300 opacity-60" />
-                  <span className="relative inline-flex size-2.5 rounded-full bg-cyan-200" />
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-cyan-300 opacity-75" />
+                  <span className="arena-live-dot relative inline-flex size-2.5 rounded-full bg-cyan-200" />
                 </span>
                 Realtime esports operating system
               </span>
@@ -170,10 +179,10 @@ export function LandingPage() {
 
             <motion.h1
               variants={heroItemVariants}
-              className="max-w-6xl text-balance text-5xl font-black leading-[0.92] tracking-[-0.065em] text-white drop-shadow-[0_24px_70px_rgba(15,23,42,0.45)] sm:text-6xl md:text-8xl lg:text-9xl"
+              className="font-display max-w-6xl text-balance text-5xl font-black leading-[0.88] tracking-[-0.065em] text-white drop-shadow-[0_24px_70px_rgba(15,23,42,0.45)] sm:text-6xl md:text-8xl lg:text-9xl"
             >
               The Future of
-              <span className="relative inline-block bg-gradient-to-r from-cyan-200 via-sky-300 to-violet-300 bg-clip-text text-transparent">
+              <span className="arena-gradient-text relative inline-block">
                 {" "}
                 Esports Tournament
               </span>{" "}
@@ -226,16 +235,24 @@ export function LandingPage() {
                 return (
                   <div
                     key={stat.label}
-                    className="rounded-2xl border border-white/10 bg-black/24 px-4 py-3 backdrop-blur-xl"
+                    className="arena-glow-card group relative overflow-hidden rounded-2xl border border-white/10 bg-black/30 px-4 py-3 backdrop-blur-xl"
                   >
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/40 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
                         {stat.label}
                       </p>
-                      <Icon className="size-4 text-cyan-200" aria-hidden="true" />
+                      <span className="flex size-7 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
+                        <Icon className="size-3.5" aria-hidden="true" />
+                      </span>
                     </div>
-                    <p className="mt-2 text-2xl font-black text-white">
-                      {loadingOverview ? "--" : stat.value}
+                    <p
+                      className="mt-2 font-display text-2xl font-black text-white"
+                      style={loadingOverview ? {} : { animation: "number-pop 0.4s ease" }}
+                    >
+                      {loadingOverview ? (
+                        <span className="inline-block h-6 w-10 animate-pulse rounded-lg bg-white/10" />
+                      ) : stat.value}
                     </p>
                   </div>
                 );

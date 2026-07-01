@@ -35,6 +35,18 @@ const iconByName: Record<string, FeatureIcon> = {
   Radio,
 };
 
+/** Distinct accent per feature icon type */
+const iconColorByName: Record<string, { border: string; bg: string; text: string; glow: string }> = {
+  Activity:    { border: "border-emerald-300/25", bg: "bg-emerald-300/10", text: "text-emerald-200", glow: "group-hover:bg-emerald-300" },
+  BarChart3:   { border: "border-violet-300/25",  bg: "bg-violet-300/10",  text: "text-violet-200",  glow: "group-hover:bg-violet-300" },
+  FileSearch:  { border: "border-sky-300/25",     bg: "bg-sky-300/10",     text: "text-sky-200",     glow: "group-hover:bg-sky-300" },
+  GitBranch:   { border: "border-amber-300/25",   bg: "bg-amber-300/10",   text: "text-amber-200",   glow: "group-hover:bg-amber-300" },
+  LockKeyhole: { border: "border-cyan-300/25",    bg: "bg-cyan-300/10",    text: "text-cyan-200",    glow: "group-hover:bg-cyan-300" },
+  Radio:       { border: "border-red-300/25",     bg: "bg-red-300/10",     text: "text-red-200",     glow: "group-hover:bg-red-300" },
+};
+
+const defaultIconColor = { border: "border-cyan-300/25", bg: "bg-cyan-300/10", text: "text-cyan-200", glow: "group-hover:bg-cyan-300" };
+
 const fadeUp = {
   hidden: {
     opacity: 0,
@@ -97,6 +109,8 @@ function FeatureCard({
   reduceMotion: boolean | null;
 }) {
   const Icon = iconByName[feature.icon] ?? Activity;
+  const color = iconColorByName[feature.icon] ?? defaultIconColor;
+  const num = String(index + 1).padStart(2, "0");
 
   return (
     <motion.article
@@ -117,7 +131,20 @@ function FeatureCard({
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
       <div className="pointer-events-none absolute -right-16 -top-16 size-44 rounded-full bg-cyan-300/10 blur-3xl opacity-0 transition duration-300 group-hover:opacity-100" />
 
-      <div className="relative mb-6 flex size-14 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 shadow-[0_0_40px_rgba(34,211,238,0.12)] transition duration-300 group-hover:border-cyan-200/50 group-hover:bg-cyan-300 group-hover:text-slate-950">
+      {/* Feature number watermark */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute right-5 top-4 font-display select-none text-5xl font-black text-white/[0.04] transition duration-300 group-hover:text-white/[0.07]"
+      >
+        {num}
+      </span>
+
+      <div
+        className={[
+          "relative mb-6 flex size-14 items-center justify-center rounded-2xl border shadow-[0_0_40px_rgba(34,211,238,0.12)] transition duration-300 group-hover:text-slate-950",
+          color.border, color.bg, color.text, color.glow,
+        ].join(" ")}
+      >
         <Icon className="size-6" aria-hidden="true" />
       </div>
 
@@ -156,7 +183,7 @@ export function PlatformFeaturesSection({
             SENIOR-GRADE SYSTEM
           </p>
 
-          <h2 className="mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
+          <h2 className="font-display mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
             More than a tournament website
           </h2>
 

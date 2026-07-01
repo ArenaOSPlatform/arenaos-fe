@@ -1,3 +1,5 @@
+import { getAccessToken } from "@/utils/authStorage";
+
 export type UserRole = "PLAYER" | "ORGANIZER" | "ADMIN";
 
 const userRoleStorageKey = "userRole";
@@ -56,6 +58,6 @@ export function getAccessTokenRole(token: string | null): UserRole | null {
 
 export function getCurrentUserRole(): UserRole | null {
   return (
-    getStoredUserRole() ?? getAccessTokenRole(localStorage.getItem("accessToken"))
+    getStoredUserRole() ?? getAccessTokenRole(getAccessToken())
   );
 }

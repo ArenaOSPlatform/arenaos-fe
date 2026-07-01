@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   CalendarClock,
@@ -12,10 +12,12 @@ import {
   Hash,
   ImagePlus,
   Loader2,
+  LogIn,
   Medal,
   Play,
   Radio,
   ShieldAlert,
+  ShieldX,
   Swords,
   Trophy,
   Upload,
@@ -38,11 +40,12 @@ import {
 } from "@/services/match.service";
 import { uploadFile } from "@/services/upload.service";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { BackButton } from "@/components/ui/BackButton";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useToast } from "@/hooks/useToast";
-import { socket } from "@/sockets/socket";
+import { connectSocket, socket } from "@/sockets/socket";
 import { formatTournamentName } from "@/utils";
 
 type Match = {
@@ -102,6 +105,12 @@ type StatusMeta = {
 };
 
 const statusMeta: Record<string, StatusMeta> = {
+  PENDING_SCHEDULE: {
+    label: "Pending schedule",
+    icon: CalendarClock,
+    pill: "border-white/15 bg-white/8 text-slate-200",
+    panel: "border-white/10 bg-white/[0.045]",
+  },
   SCHEDULED: {
     label: "Scheduled",
     icon: CalendarClock,
@@ -114,6 +123,18 @@ const statusMeta: Record<string, StatusMeta> = {
     pill: "border-emerald-300/25 bg-emerald-300/12 text-emerald-100",
     panel: "border-emerald-300/20 bg-emerald-300/[0.045]",
   },
+  CHECK_IN_OPEN: {
+    label: "Check-in open",
+    icon: Clock3,
+    pill: "border-amber-300/25 bg-amber-300/12 text-amber-100",
+    panel: "border-amber-300/20 bg-amber-300/[0.045]",
+  },
+  LIVE: {
+    label: "Live",
+    icon: Radio,
+    pill: "border-red-300/25 bg-red-300/12 text-red-100",
+    panel: "border-red-300/20 bg-red-300/[0.045]",
+  },
   IN_PROGRESS: {
     label: "Live",
     icon: Radio,
@@ -121,6 +142,12 @@ const statusMeta: Record<string, StatusMeta> = {
     panel: "border-red-300/20 bg-red-300/[0.045]",
   },
   PENDING_CONFIRMATION: {
+    label: "Pending",
+    icon: Clock3,
+    pill: "border-amber-300/25 bg-amber-300/12 text-amber-100",
+    panel: "border-amber-300/20 bg-amber-300/[0.045]",
+  },
+  WAITING_CONFIRMATION: {
     label: "Pending",
     icon: Clock3,
     pill: "border-amber-300/25 bg-amber-300/12 text-amber-100",
@@ -160,6 +187,16 @@ function getApiErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function getApiErrorStatus(error: unknown) {
+  if (typeof error === "object" && error !== null && "response" in error) {
+    const response = (error as { response?: { status?: unknown } }).response;
+
+    return typeof response?.status === "number" ? response.status : null;
+  }
+
+  return null;
+}
+
 function getBestOfValue(bestOf?: string | null) {
   const normalized = (bestOf ?? "BO1").trim().toUpperCase();
   const match = normalized.match(/^BO([135])$/);
@@ -195,6 +232,14 @@ function getScoreValidationMessage(
 
 function getStatusMeta(value: string) {
   return statusMeta[value] ?? fallbackStatusMeta;
+}
+
+function isLiveStatus(status: string) {
+  return status === "LIVE" || status === "IN_PROGRESS";
+}
+
+function isWaitingConfirmationStatus(status: string) {
+  return status === "WAITING_CONFIRMATION" || status === "PENDING_CONFIRMATION";
 }
 
 function formatDate(value?: string | null) {
@@ -368,6 +413,7 @@ export function MatchRoomPage() {
   const [archiveEvidenceNote, setArchiveEvidenceNote] = useState("");
   const [disputeReason, setDisputeReason] = useState("");
   const [pageError, setPageError] = useState("");
+  const [pageErrorStatus, setPageErrorStatus] = useState<number | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
   async function loadMatch(matchId: string) {
@@ -390,9 +436,11 @@ export function MatchRoomPage() {
     async function fetchMatch() {
       try {
         setPageError("");
+        setPageErrorStatus(null);
         await loadMatch(matchId);
       } catch (err) {
         if (!cancelled) {
+          setPageErrorStatus(getApiErrorStatus(err));
           setPageError(getApiErrorMessage(err, "Match not found."));
         }
       }
@@ -408,7 +456,8 @@ export function MatchRoomPage() {
   useEffect(() => {
     if (!id) return;
 
-    if (!socket.connected) socket.connect();
+    if (!connectSocket()) return;
+
     socket.emit("join:match", id);
 
     const refreshMatch = () => {
@@ -431,6 +480,46 @@ export function MatchRoomPage() {
       socket.off("match:disputed", refreshMatch);
     };
   }, [id]);
+
+  const matchLoadError =
+    pageErrorStatus === 401
+      ? {
+          title: "Login required",
+          description:
+            "Sign in with an account assigned to this match to open the room and evidence archive.",
+          icon: LogIn,
+          action: (
+            <Link
+              to="/login"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-cyan-200"
+            >
+              <LogIn className="size-4" aria-hidden="true" />
+              Login
+            </Link>
+          ),
+        }
+      : pageErrorStatus === 403
+        ? {
+            title: "Access denied",
+            description:
+              "Only assigned team members, the organizer, or an admin can access this match room.",
+            icon: ShieldX,
+            action: (
+              <Link
+                to="/tournaments"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-5 text-sm font-black text-cyan-100 transition hover:bg-white/[0.1]"
+              >
+                <Trophy className="size-4" aria-hidden="true" />
+                Browse tournaments
+              </Link>
+            ),
+          }
+        : {
+            title: "Match unavailable",
+            description: pageError,
+            icon: AlertTriangle,
+            action: null,
+          };
 
   async function handleSubmitResult() {
     if (!id || !match) return;
@@ -654,10 +743,11 @@ export function MatchRoomPage() {
         <div className="mx-auto max-w-7xl space-y-5">
           <BackButton fallbackTo="/tournaments" label="Back" />
           {pageError ? (
-            <EmptyState
-              icon={AlertTriangle}
-              title="Match unavailable"
-              description={pageError}
+            <ErrorState
+              icon={matchLoadError.icon}
+              title={matchLoadError.title}
+              description={matchLoadError.description}
+              action={matchLoadError.action}
             />
           ) : (
             <LoadingState
@@ -671,7 +761,7 @@ export function MatchRoomPage() {
   }
 
   const isPendingConfirmation =
-    match.status === "PENDING_CONFIRMATION" ||
+    isWaitingConfirmationStatus(match.status) ||
     match.resultStatus === "PENDING_CONFIRMATION";
   const pendingEvidence = evidences.find(
     (item) => item.id === match.resultEvidenceId,
@@ -690,8 +780,8 @@ export function MatchRoomPage() {
   const checkInDisabled =
     loadingAction === "check-in" ||
     match.status === "READY" ||
-    match.status === "IN_PROGRESS" ||
-    match.status === "PENDING_CONFIRMATION" ||
+    isLiveStatus(match.status) ||
+    isWaitingConfirmationStatus(match.status) ||
     match.status === "DISPUTED" ||
     match.status === "COMPLETED" ||
     match.status === "CANCELLED";
@@ -800,7 +890,7 @@ export function MatchRoomPage() {
                 </InfoTile>
 
                 <InfoTile icon={Video} label="Stream">
-                  {match.status === "IN_PROGRESS" && match.livestreamUrl ? (
+                  {isLiveStatus(match.status) && match.livestreamUrl ? (
                     <a
                       href={match.livestreamUrl}
                       target="_blank"
@@ -952,7 +1042,7 @@ export function MatchRoomPage() {
                 Submit Result
               </h2>
 
-              {match.status === "IN_PROGRESS" ? (
+              {isLiveStatus(match.status) ? (
                 <div className="mt-5 space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <label>
@@ -1012,7 +1102,7 @@ export function MatchRoomPage() {
                 </div>
               ) : (
                 <p className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-slate-400">
-                  Result submission opens when the match is IN_PROGRESS.
+                  Result submission opens when the match is live.
                 </p>
               )}
             </section>

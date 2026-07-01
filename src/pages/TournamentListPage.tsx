@@ -42,11 +42,21 @@ const toneClasses: Record<Tone, string> = {
 };
 
 function getStatusTone(status: string): Tone {
-  if (["OPEN_REGISTRATION", "IN_PROGRESS", "COMPLETED"].includes(status)) {
+  if (["OPEN_REGISTRATION", "ONGOING", "LIVE", "IN_PROGRESS", "COMPLETED"].includes(status)) {
     return "emerald";
   }
 
-  if (["PENDING", "PENDING_APPROVAL", "MATCH_SCHEDULED"].includes(status)) {
+  if (
+    [
+      "PENDING",
+      "PENDING_APPROVAL",
+      "PENDING_SCHEDULE",
+      "SCHEDULED",
+      "MATCH_SCHEDULED",
+      "CHECK_IN_OPEN",
+      "WAITING_CONFIRMATION",
+    ].includes(status)
+  ) {
     return "amber";
   }
 
@@ -59,6 +69,20 @@ function getStatusTone(status: string): Tone {
   }
 
   return "cyan";
+}
+
+function getCardHoverGlow(status: string): string {
+  if (["ONGOING", "LIVE", "IN_PROGRESS"].includes(status)) {
+    return "hover:border-red-300/35 hover:shadow-[0_28px_80px_rgba(248,113,113,0.1)]";
+  }
+  if (status === "OPEN_REGISTRATION") {
+    return "hover:border-emerald-300/35 hover:shadow-[0_28px_80px_rgba(52,211,153,0.1)]";
+  }
+  return "hover:border-cyan-300/35 hover:shadow-[0_28px_80px_rgba(34,211,238,0.08)]";
+}
+
+function isLiveStatus(status: string): boolean {
+  return ["ONGOING", "LIVE", "IN_PROGRESS"].includes(status);
 }
 
 function formatStatus(value: string) {
@@ -78,12 +102,17 @@ function formatDate(value: string) {
 
 function StatusPill({ value }: { value: string }) {
   const tone = getStatusTone(value);
+  const live = isLiveStatus(value);
 
   return (
     <span
       className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${toneClasses[tone]}`}
     >
-      <span className="size-1.5 rounded-full bg-current" />
+      {live ? (
+        <span className="arena-live-dot size-1.5 rounded-full bg-current" />
+      ) : (
+        <span className="size-1.5 rounded-full bg-current" />
+      )}
       {formatStatus(value)}
     </span>
   );
@@ -225,7 +254,7 @@ export function TournamentListPage() {
     (item) => item.status === "OPEN_REGISTRATION",
   ).length;
   const liveCount = tournaments.filter((item) =>
-    ["IN_PROGRESS", "BRACKET_GENERATED"].includes(item.status),
+    ["ONGOING", "BRACKET_GENERATED"].includes(item.status),
   ).length;
   const gamesCount = new Set(tournaments.map((item) => item.game)).size;
 
@@ -244,7 +273,7 @@ export function TournamentListPage() {
               Tournaments
             </span>
 
-            <h1 className="mt-7 max-w-4xl text-4xl font-black leading-[0.95] text-white sm:text-5xl lg:text-6xl">
+            <h1 className="font-display mt-7 max-w-4xl text-4xl font-black leading-[0.95] text-white sm:text-5xl lg:text-6xl">
               Live Arena
             </h1>
             <p className="mt-5 max-w-3xl text-base leading-8 text-slate-300">
@@ -397,7 +426,7 @@ export function TournamentListPage() {
               {pagedTournaments.map((item) => (
                 <article
                   key={item.id}
-                  className="group rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-6 shadow-[0_22px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl transition duration-300 hover:-translate-y-1.5 hover:border-cyan-300/35 hover:bg-white/[0.065] hover:shadow-[0_28px_80px_rgba(34,211,238,0.08)]"
+                  className={`group rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-6 shadow-[0_22px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl transition duration-300 hover:-translate-y-1.5 hover:bg-white/[0.065] ${getCardHoverGlow(item.status)}`}
                 >
                   <div className="mb-7 flex items-start justify-between gap-4">
                     <StatusPill value={item.status} />

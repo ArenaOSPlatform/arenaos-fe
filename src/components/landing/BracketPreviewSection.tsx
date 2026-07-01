@@ -40,13 +40,32 @@ function TeamSlot({ name, active }: { name: string | null; active: boolean }) {
   return (
     <div
       className={[
-        "rounded-2xl border p-4 transition duration-300",
+        "relative flex items-center gap-2.5 overflow-hidden rounded-2xl border p-4 transition duration-300",
         active
-          ? "border-cyan-300/60 bg-cyan-300/10 shadow-[0_0_40px_rgba(34,211,238,0.14)]"
+          ? "border-cyan-300/60 bg-cyan-300/10 shadow-[0_0_40px_rgba(34,211,238,0.18)]"
           : "border-white/10 bg-white/[0.035]",
       ].join(" ")}
     >
-      <p className="truncate font-bold text-white">{name ? formatTournamentName(name) : "TBD"}</p>
+      {active && (
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-cyan-300 text-slate-950 shadow-[0_0_12px_rgba(34,211,238,0.5)]">
+          <svg
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            className="size-3"
+            aria-hidden="true"
+          >
+            <path d="M8 1l1.88 3.81 4.2.61-3.04 2.96.72 4.18L8 10.4l-3.76 1.98.72-4.18L1.92 5.42l4.2-.61z" />
+          </svg>
+        </span>
+      )}
+      <p
+        className={[
+          "truncate font-bold",
+          active ? "text-white" : "text-slate-300",
+        ].join(" ")}
+      >
+        {name ? formatTournamentName(name) : "TBD"}
+      </p>
     </div>
   );
 }
@@ -90,6 +109,8 @@ function MatchCard({
   index: number;
   reduceMotion: boolean | null;
 }) {
+  const isCompleted = match.status === "COMPLETED";
+
   return (
     <motion.article
       initial={
@@ -104,18 +125,44 @@ function MatchCard({
         ease: UI.motion.ease,
       }}
       viewport={{ once: true, margin: "-80px" }}
-      className="group relative overflow-hidden rounded-3xl border border-white/10 bg-black/25 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-black/35"
+      className={[
+        "group relative overflow-hidden rounded-3xl border p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition duration-300 hover:-translate-y-1",
+        isCompleted
+          ? "border-white/[0.07] bg-black/15 opacity-80 hover:border-white/15"
+          : "border-white/10 bg-black/25 hover:border-white/20 hover:bg-black/35",
+      ].join(" ")}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/40 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
 
-      <p className="mb-4 text-xs font-black uppercase tracking-[0.18em] text-slate-500">
-        ROUND {match.roundNumber} / MATCH {match.matchNumber}
-      </p>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+          RD {match.roundNumber} · M{match.matchNumber}
+        </p>
+        {isCompleted && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-300">
+            <svg viewBox="0 0 12 12" fill="currentColor" className="size-2.5">
+              <path
+                d="M10 3L5 8.5 2 5.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Done
+          </span>
+        )}
+      </div>
 
       <TeamSlot name={match.left} active={match.winner === match.left} />
 
-      <div className="my-3 text-center text-xs font-black tracking-[0.22em] text-slate-500">
-        VS
+      <div className="relative my-3 flex items-center gap-2">
+        <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/15" />
+        <span className="rounded-full border border-white/10 bg-black/40 px-2.5 py-0.5 text-[10px] font-black tracking-[0.22em] text-slate-500">
+          VS
+        </span>
+        <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/15" />
       </div>
 
       <TeamSlot name={match.right} active={match.winner === match.right} />
@@ -158,7 +205,7 @@ function CurrentMatchPanel({ currentMatch }: { currentMatch?: Match }) {
           value={
             currentMatch
               ? `${formatTournamentName(currentMatch.left ?? "TBD")} vs ${formatTournamentName(
-                  currentMatch.right ?? "TBD"
+                  currentMatch.right ?? "TBD",
                 )}`
               : "No active match"
           }
@@ -228,11 +275,10 @@ export function BracketPreviewSection({
           <p className="inline-flex rounded-full border border-violet-300/20 bg-violet-300/10 px-4 py-2 text-xs font-black uppercase tracking-[0.28em] text-violet-200 backdrop-blur-xl">
             BRACKET ENGINE
           </p>
-
-          <h2 className="mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
+          <h2 className="font-display mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
             Realtime tournament bracket updates
           </h2>
-
+          // Description of the bracket preview functionality
           <p className="mt-5 max-w-2xl text-base leading-8 text-slate-300 md:text-lg">
             Winners automatically advance to the next round while every
             spectator sees the bracket update live without refreshing the page.
@@ -259,7 +305,9 @@ export function BracketPreviewSection({
                 <h3 className="text-xl font-black tracking-[-0.02em] text-white sm:text-2xl">
                   {loading
                     ? "Loading bracket..."
-                    : (bracket?.tournament.name ? formatTournamentName(bracket.tournament.name) : "No bracket generated yet")}
+                    : bracket?.tournament.name
+                      ? formatTournamentName(bracket.tournament.name)
+                      : "No bracket generated yet"}
                 </h3>
 
                 <p className="mt-1 text-sm leading-6 text-slate-400">

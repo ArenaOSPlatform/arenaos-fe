@@ -28,6 +28,7 @@ import {
   roleHomePath,
   setStoredUserRole,
 } from "@/routes/route-role";
+import { clearStoredTokens, setAccessToken } from "@/utils/authStorage";
 
 function getEmailLooksValid(value: string) {
   return /^\S+@\S+\.\S+$/.test(value.trim());
@@ -147,8 +148,7 @@ export function LoginPage() {
 
   const completeLogin = useCallback(
     (res: AuthResponse, message: string) => {
-      localStorage.setItem("accessToken", res.data.accessToken);
-      localStorage.setItem("refreshToken", res.data.refreshToken);
+      setAccessToken(res.data.accessToken);
 
       const roleFromResponse = res.data.user?.role ?? res.data.role;
       const role = isUserRole(roleFromResponse)
@@ -156,8 +156,7 @@ export function LoginPage() {
         : getAccessTokenRole(res.data.accessToken);
 
       if (!role) {
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("refreshToken");
+        clearStoredTokens();
         clearStoredUserRole();
         toast.error("Invalid account role");
         return;
