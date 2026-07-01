@@ -1,6 +1,6 @@
 import type { LandingTopTeam } from "@/services/landing.service";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Crown, Shield, TrendingUp } from "lucide-react";
+import { ArrowRight, Crown, TrendingUp } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -34,6 +34,29 @@ const fadeUp = {
     },
   },
 };
+
+function getInitials(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase() || "?";
+}
+
+function getRankBadgeClass(rank: number): string {
+  if (rank === 1) return "arena-rank-gold";
+  if (rank === 2) return "arena-rank-silver";
+  if (rank === 3) return "arena-rank-bronze";
+  return "";
+}
+
+function getWinRateBarClass(rate: number): string {
+  if (rate >= 60) return "arena-bar-high";
+  if (rate >= 40) return "arena-bar-mid";
+  return "arena-bar-low";
+}
 
 function ChampionStat({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -144,6 +167,10 @@ function RankingRow({
   index: number;
   reduceMotion: boolean | null;
 }) {
+  const rankBadgeClass = getRankBadgeClass(team.rank);
+  const barClass = getWinRateBarClass(team.winRate);
+  const initials = getInitials(team.name);
+
   return (
     <motion.article
       initial={
@@ -158,15 +185,22 @@ function RankingRow({
         ease: UI.motion.ease,
       }}
       viewport={{ once: true, margin: "-80px" }}
-      className="group grid items-center gap-4 rounded-3xl border border-white/10 bg-black/25 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition duration-300 hover:-translate-y-1 hover:border-cyan-300/45 hover:bg-white/[0.06] md:grid-cols-[70px_1fr_120px_120px_120px]"
+      className="group grid items-center gap-4 rounded-3xl border border-white/10 bg-black/25 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition duration-300 hover:-translate-y-1 hover:border-cyan-300/45 hover:bg-white/[0.06] md:grid-cols-[70px_1fr_120px_120px_140px]"
     >
-      <div className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.07] text-lg font-black text-white">
+      <div
+        className={[
+          "flex size-12 items-center justify-center rounded-2xl text-sm font-black",
+          rankBadgeClass
+            ? `${rankBadgeClass} shadow-lg`
+            : "border border-white/10 bg-white/[0.07] text-white",
+        ].join(" ")}
+      >
         #{team.rank}
       </div>
 
       <div className="flex min-w-0 items-center gap-4">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-300/10 text-violet-200 transition duration-300 group-hover:bg-violet-300 group-hover:text-slate-950">
-          <Shield className="size-5" aria-hidden="true" />
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-violet-300/20 bg-gradient-to-br from-violet-500/30 to-indigo-600/30 text-sm font-black text-violet-100 transition duration-300 group-hover:from-violet-400/50 group-hover:to-indigo-500/40">
+          {initials}
         </div>
 
         <div className="min-w-0">
@@ -178,9 +212,17 @@ function RankingRow({
       <RankingMetric label="Wins" value={team.wins} />
       <RankingMetric label="Losses" value={team.losses} />
 
-      <div className="flex items-center gap-2 text-cyan-200">
-        <TrendingUp className="size-5" aria-hidden="true" />
-        <p className="font-black">{team.winRate}%</p>
+      <div>
+        <div className="flex items-center gap-2 text-cyan-200">
+          <TrendingUp className="size-4" aria-hidden="true" />
+          <p className="font-black">{team.winRate}%</p>
+        </div>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-black/30">
+          <div
+            className={`h-full rounded-full transition-all duration-700 ${barClass}`}
+            style={{ width: `${Math.min(100, team.winRate)}%` }}
+          />
+        </div>
       </div>
     </motion.article>
   );
@@ -209,7 +251,7 @@ export function TopTeamsSection({ loading, teams }: TopTeamsSectionProps) {
               LEADERBOARD
             </p>
 
-            <h2 className="mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
+            <h2 className="font-display mt-5 text-balance text-4xl font-black tracking-[-0.04em] text-white md:text-6xl">
               Top performing teams
             </h2>
 

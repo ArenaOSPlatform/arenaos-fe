@@ -1,5 +1,4 @@
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Float, Points, PointMaterial, Stars } from "@react-three/drei";
 import { useMemo, useRef } from "react";
 import type { Group, Points as ThreePoints } from "three";
 import * as THREE from "three";
@@ -51,8 +50,11 @@ function ParticleField() {
   });
 
   return (
-    <Points ref={ref} positions={positions} stride={3}>
-      <PointMaterial
+    <points ref={ref}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial
         transparent
         color="#67e8f9"
         size={0.028}
@@ -60,7 +62,51 @@ function ParticleField() {
         depthWrite={false}
         opacity={0.7}
       />
-    </Points>
+    </points>
+  );
+}
+
+function StarField() {
+  const positions = useMemo(() => {
+    const points = new Float32Array(900 * 3);
+    const random = createSeededRandom(108);
+
+    for (let i = 0; i < 900; i += 1) {
+      const index = i * 3;
+      const radius = 12 + random() * 30;
+      const theta = random() * Math.PI * 2;
+      const phi = Math.acos(2 * random() - 1);
+
+      points[index] = radius * Math.sin(phi) * Math.cos(theta);
+      points[index + 1] = radius * Math.sin(phi) * Math.sin(theta);
+      points[index + 2] = radius * Math.cos(phi);
+    }
+
+    return points;
+  }, []);
+
+  const ref = useRef<ThreePoints>(null);
+
+  useFrame((_, delta) => {
+    if (!ref.current) return;
+
+    ref.current.rotation.y += delta * 0.012;
+  });
+
+  return (
+    <points ref={ref}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial
+        transparent
+        color="#e0f2fe"
+        size={0.035}
+        sizeAttenuation
+        depthWrite={false}
+        opacity={0.55}
+      />
+    </points>
   );
 }
 
@@ -110,42 +156,41 @@ function ArenaCore() {
 
     ref.current.rotation.y += delta * 0.22;
     ref.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.35) * 0.12;
+    ref.current.position.y = Math.sin(state.clock.elapsedTime * 1.1) * 0.08;
   });
 
   return (
-    <Float speed={1.8} rotationIntensity={0.45} floatIntensity={0.8}>
-      <group ref={ref}>
-        <mesh>
-          <icosahedronGeometry args={[1.15, 2]} />
-          <meshPhysicalMaterial
-            color="#0f172a"
-            emissive="#22d3ee"
-            emissiveIntensity={0.75}
-            roughness={0.16}
-            metalness={0.55}
-            transmission={0.2}
-            thickness={0.75}
-            clearcoat={1}
-            clearcoatRoughness={0.12}
-          />
-        </mesh>
+    <group ref={ref}>
+      <mesh>
+        <icosahedronGeometry args={[1.15, 2]} />
+        <meshPhysicalMaterial
+          color="#0f172a"
+          emissive="#22d3ee"
+          emissiveIntensity={0.75}
+          roughness={0.16}
+          metalness={0.55}
+          transmission={0.2}
+          thickness={0.75}
+          clearcoat={1}
+          clearcoatRoughness={0.12}
+        />
+      </mesh>
 
-        <mesh scale={1.04}>
-          <icosahedronGeometry args={[1.15, 1]} />
-          <meshBasicMaterial
-            color="#67e8f9"
-            wireframe
-            transparent
-            opacity={0.22}
-          />
-        </mesh>
+      <mesh scale={1.04}>
+        <icosahedronGeometry args={[1.15, 1]} />
+        <meshBasicMaterial
+          color="#67e8f9"
+          wireframe
+          transparent
+          opacity={0.22}
+        />
+      </mesh>
 
-        <mesh scale={1.28}>
-          <sphereGeometry args={[1, 48, 48]} />
-          <meshBasicMaterial color="#22d3ee" transparent opacity={0.055} />
-        </mesh>
-      </group>
-    </Float>
+      <mesh scale={1.28}>
+        <sphereGeometry args={[1, 48, 48]} />
+        <meshBasicMaterial color="#22d3ee" transparent opacity={0.055} />
+      </mesh>
+    </group>
   );
 }
 
@@ -285,16 +330,7 @@ function ArenaScene() {
       <SceneLights />
       <MouseRig />
 
-      <Stars
-        radius={40}
-        depth={16}
-        count={900}
-        factor={3}
-        saturation={0}
-        fade
-        speed={0.35}
-      />
-
+      <StarField />
       <ParticleField />
 
       <group position={[1.7, 0.05, 0]} rotation={[0.08, -0.35, 0]}>

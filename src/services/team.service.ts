@@ -104,8 +104,10 @@ export async function removeTeamMember(teamId: string, userId: string) {
   return res.data;
 }
 
-export async function leaveTeam() {
-  const res = await api.post("/teams/leave");
+export async function leaveTeam(teamId?: string) {
+  const res = await api.post(
+    teamId ? `/teams/${teamId}/leave` : "/teams/leave",
+  );
   return res.data;
 }
 
@@ -124,13 +126,28 @@ export async function getMyTeam() {
   return res.data;
 }
 
+export async function getMyTeams() {
+  const res = await api.get("/teams/my/all");
+  return res.data;
+}
+
 export async function getMyTeamRankingHistory() {
   const res = await api.get("/teams/my/ranking-history");
   return res.data;
 }
 
+export async function getTeamRankingHistory(teamId: string) {
+  const res = await api.get(`/teams/${teamId}/ranking-history`);
+  return res.data;
+}
+
 export async function getMyTeamSchedule() {
   const res = await api.get("/teams/my/schedule");
+  return res.data;
+}
+
+export async function getTeamSchedule(teamId: string) {
+  const res = await api.get(`/teams/${teamId}/schedule`);
   return res.data;
 }
 

@@ -39,7 +39,6 @@ export type AuthResponse = {
   message: string;
   data: {
     accessToken: string;
-    refreshToken: string;
     role: UserRole;
     user: {
       id: string;
@@ -122,18 +121,8 @@ export async function updateProfile(
   return res.data;
 }
 
-export async function refreshAuthToken(
-  refreshToken: string,
-): Promise<AuthResponse> {
-  const res = await api.post(
-    "/auth/refresh-token",
-    {},
-    {
-      headers: {
-        Authorization: `Bearer ${refreshToken}`,
-      },
-    },
-  );
+export async function refreshAuthToken(): Promise<AuthResponse> {
+  const res = await api.post("/auth/refresh-token");
   return res.data;
 }
 

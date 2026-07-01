@@ -137,11 +137,31 @@ const toneClasses: Record<Tone, string> = {
 };
 
 function getStatusTone(status: string): Tone {
-  if (["APPROVED", "OPEN_REGISTRATION", "READY", "COMPLETED"].includes(status)) {
+  if (
+    [
+      "APPROVED",
+      "OPEN_REGISTRATION",
+      "READY",
+      "LIVE",
+      "IN_PROGRESS",
+      "ONGOING",
+      "COMPLETED",
+    ].includes(status)
+  ) {
     return "emerald";
   }
 
-  if (["PENDING", "PENDING_APPROVAL", "MATCH_SCHEDULED", "IN_PROGRESS"].includes(status)) {
+  if (
+    [
+      "PENDING",
+      "PENDING_APPROVAL",
+      "PENDING_SCHEDULE",
+      "SCHEDULED",
+      "MATCH_SCHEDULED",
+      "CHECK_IN_OPEN",
+      "WAITING_CONFIRMATION",
+    ].includes(status)
+  ) {
     return "amber";
   }
 
@@ -193,12 +213,14 @@ function MetricCard({
   value,
   helper,
   tone,
+  barPercent,
 }: {
   icon: ReactNode;
   label: string;
   value: ReactNode;
   helper?: ReactNode;
   tone: Tone;
+  barPercent?: number;
 }) {
   return (
     <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
@@ -207,7 +229,7 @@ function MetricCard({
           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
             {label}
           </p>
-          <p className="mt-3 text-4xl font-black leading-none text-white">
+          <p className="font-display mt-3 text-4xl font-black leading-none text-white">
             {value}
           </p>
           {helper && <p className="mt-2 text-sm text-slate-400">{helper}</p>}
@@ -218,6 +240,25 @@ function MetricCard({
           {icon}
         </span>
       </div>
+      {barPercent !== undefined && (
+        <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-black/25">
+          <div
+            className={[
+              "h-full rounded-full transition-all duration-1000",
+              tone === "cyan"
+                ? "bg-gradient-to-r from-cyan-400 to-sky-300"
+                : tone === "emerald"
+                  ? "bg-gradient-to-r from-emerald-400 to-green-300"
+                  : tone === "amber"
+                    ? "bg-gradient-to-r from-amber-400 to-yellow-300"
+                    : tone === "red"
+                      ? "bg-gradient-to-r from-red-400 to-rose-300"
+                      : "bg-gradient-to-r from-violet-400 to-purple-300",
+            ].join(" ")}
+            style={{ width: `${Math.max(4, Math.min(100, barPercent))}%` }}
+          />
+        </div>
+      )}
     </article>
   );
 }
@@ -1406,11 +1447,14 @@ export function OrganizerDashboardPage() {
     decision: ResolveDecision,
   ) {
     const dispute = disputes.find((item) => item.id === disputeId);
+    const decisionReason = `Organizer resolved this dispute with ${formatStatus(
+      decision,
+    ).toLowerCase()}.`;
     const confirmed = await confirm({
       title: "Resolve dispute?",
       description: `Close "${dispute?.reason ?? "this dispute"}" with your decision.`,
       confirmText: "Resolve",
-      tone: "success",
+      tone: decision === "REMATCH" ? "warning" : "success",
     });
 
     if (!confirmed) return;
@@ -1418,7 +1462,7 @@ export function OrganizerDashboardPage() {
     try {
       setLoadingAction(true);
 
-      await resolveDispute(disputeId, { decision });
+      await resolveDispute(disputeId, { decision, decisionReason });
 
       toast.success("Dispute resolved successfully");
       await loadDisputes();
@@ -1725,6 +1769,7 @@ export function OrganizerDashboardPage() {
             value={tournaments.length}
             helper="managed events"
             tone="amber"
+            barPercent={Math.min(100, tournaments.length * 10)}
           />
           <MetricCard
             icon={<Users className="size-5" />}
@@ -1732,6 +1777,7 @@ export function OrganizerDashboardPage() {
             value={registrations.length}
             helper={`${pendingCount} pending`}
             tone="cyan"
+            barPercent={registrations.length > 0 ? Math.round(((registrations.length - pendingCount) / registrations.length) * 100) : 0}
           />
           <MetricCard
             icon={<CheckCircle2 className="size-5" />}
@@ -1739,6 +1785,7 @@ export function OrganizerDashboardPage() {
             value={approvedCount}
             helper="accepted teams"
             tone="emerald"
+            barPercent={registrations.length > 0 ? Math.round((approvedCount / registrations.length) * 100) : 0}
           />
           <MetricCard
             icon={<ShieldAlert className="size-5" />}
@@ -1746,6 +1793,7 @@ export function OrganizerDashboardPage() {
             value={pendingCount}
             helper="needs review"
             tone="violet"
+            barPercent={registrations.length > 0 ? Math.round((pendingCount / registrations.length) * 100) : 0}
           />
           <MetricCard
             icon={<ShieldAlert className="size-5" />}
@@ -1753,6 +1801,7 @@ export function OrganizerDashboardPage() {
             value={openDisputesCount}
             helper="match reports"
             tone="red"
+            barPercent={disputes.length > 0 ? Math.round((openDisputesCount / disputes.length) * 100) : 0}
           />
         </section>
 
@@ -2088,6 +2137,13 @@ export function OrganizerDashboardPage() {
                       <div className="flex items-center">
                         {item.status === "PENDING" ? (
                           <div className="flex flex-wrap gap-2">
+                            <Link
+                              to={`/teams/${item.team.id}`}
+                              className="rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm font-black text-cyan-100 transition hover:-translate-y-0.5 hover:bg-cyan-300/20"
+                            >
+                              View Team
+                            </Link>
+
                             <button
                               onClick={() => handleApprove(item.id)}
                               disabled={
@@ -2111,9 +2167,17 @@ export function OrganizerDashboardPage() {
                             </button>
                           </div>
                         ) : (
-                          <span className="rounded-2xl bg-white/10 px-4 py-2 text-sm font-bold text-white/50">
-                            Done
-                          </span>
+                          <div className="flex flex-wrap gap-2">
+                            <Link
+                              to={`/teams/${item.team.id}`}
+                              className="rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-sm font-black text-cyan-100 transition hover:-translate-y-0.5 hover:bg-cyan-300/20"
+                            >
+                              View Team
+                            </Link>
+                            <span className="rounded-2xl bg-white/10 px-4 py-2 text-sm font-bold text-white/50">
+                              Done
+                            </span>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2466,7 +2530,7 @@ export function OrganizerDashboardPage() {
                       onClick={() => handleUpdateLivestream(match.id)}
                       disabled={
                         isCompleted ||
-                        match.status !== "IN_PROGRESS" ||
+                        !["LIVE", "IN_PROGRESS"].includes(match.status) ||
                         updatingLivestreamMatchId === match.id
                       }
                       className="flex min-h-12 items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:-translate-y-0.5 hover:bg-cyan-300/20 disabled:opacity-50 disabled:hover:translate-y-0"

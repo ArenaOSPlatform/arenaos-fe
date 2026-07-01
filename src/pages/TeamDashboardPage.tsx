@@ -1,12 +1,12 @@
-import { type ReactNode, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   acceptTeamInvite,
   createTeam,
-  getMyTeam,
   getMyTeamInvites,
-  getMyTeamRankingHistory,
-  getMyTeamSchedule,
+  getMyTeams,
+  getTeamRankingHistory,
+  getTeamSchedule,
   inviteTeamMember,
   leaveTeam,
   removeTeamMember,
@@ -105,11 +105,31 @@ const toneClasses: Record<Tone, string> = {
 };
 
 function getStatusTone(status: string): Tone {
-  if (["ACCEPTED", "APPROVED", "COMPLETED", "WIN", "IN_PROGRESS"].includes(status)) {
+  if (
+    [
+      "ACCEPTED",
+      "APPROVED",
+      "COMPLETED",
+      "WIN",
+      "LIVE",
+      "IN_PROGRESS",
+      "ONGOING",
+    ].includes(status)
+  ) {
     return "emerald";
   }
 
-  if (["PENDING", "MATCH_SCHEDULED", "SCHEDULED", "OPEN"].includes(status)) {
+  if (
+    [
+      "PENDING",
+      "PENDING_SCHEDULE",
+      "MATCH_SCHEDULED",
+      "SCHEDULED",
+      "CHECK_IN_OPEN",
+      "WAITING_CONFIRMATION",
+      "OPEN",
+    ].includes(status)
+  ) {
     return "amber";
   }
 
@@ -271,7 +291,12 @@ function TeamMark({
 export function TeamDashboardPage() {
   const toast = useToast();
   const confirm = useConfirm();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isCreateRoute = location.pathname === "/team/create";
   const [team, setTeam] = useState<Team | null>(null);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [ranking, setRanking] = useState<TeamRankingHistory | null>(null);
   const [schedule, setSchedule] = useState<TeamScheduleMatch[]>([]);
@@ -291,37 +316,55 @@ export function TeamDashboardPage() {
   const [editTeamLogoFile, setEditTeamLogoFile] = useState<File | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
 
-  async function loadTeamData() {
-    const [meRes, teamRes, invitesRes, rankingRes, scheduleRes] =
-      await Promise.all([
-        getMe(),
-        getMyTeam(),
-        getMyTeamInvites(),
-        getMyTeamRankingHistory(),
-        getMyTeamSchedule(),
-      ]);
+  const loadTeamData = useCallback(async (preferredTeamId: string | null) => {
+    const [meRes, teamsRes, invitesRes] = await Promise.all([
+      getMe(),
+      getMyTeams(),
+      getMyTeamInvites(),
+    ]);
+    const userTeams = (teamsRes.data ?? []) as Team[];
+    const nextTeam =
+      userTeams.find((item) => item.id === preferredTeamId) ??
+      userTeams[0] ??
+      null;
 
     setCurrentUserId(meRes.data.sub);
-    setTeam(teamRes.data);
+    setTeams(userTeams);
+    setTeam(nextTeam);
+    setSelectedTeamId(nextTeam?.id ?? null);
     setInvites(invitesRes.data);
-    setRanking(rankingRes.data);
-    setSchedule(scheduleRes.data);
 
-    if (teamRes.data) {
-      setEditTeamName(teamRes.data.name);
-      setEditTeamGame(teamRes.data.game ?? "");
-      setEditTeamRegion(teamRes.data.region ?? "");
-      setEditTeamDescription(teamRes.data.description ?? "");
+    if (nextTeam) {
+      const [rankingRes, scheduleRes] = await Promise.all([
+        getTeamRankingHistory(nextTeam.id),
+        getTeamSchedule(nextTeam.id),
+      ]);
+
+      setRanking(rankingRes.data);
+      setSchedule(scheduleRes.data);
+      setEditTeamName(nextTeam.name);
+      setEditTeamGame(nextTeam.game ?? "");
+      setEditTeamRegion(nextTeam.region ?? "");
+      setEditTeamDescription(nextTeam.description ?? "");
       setEditTeamLogoFile(null);
+      return;
     }
-  }
+
+    setRanking(null);
+    setSchedule([]);
+    setEditTeamName("");
+    setEditTeamGame("");
+    setEditTeamRegion("");
+    setEditTeamDescription("");
+    setEditTeamLogoFile(null);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function fetchTeam() {
       try {
-        await loadTeamData();
+        await loadTeamData(null);
       } catch (err) {
         if (!cancelled) {
           toast.error(
@@ -340,7 +383,7 @@ export function TeamDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [toast]);
+  }, [loadTeamData, toast]);
 
   async function handleCreateTeam() {
     if (!teamName.trim()) {
@@ -373,7 +416,11 @@ export function TeamDashboardPage() {
       setTeamRegion("");
       setTeamDescription("");
       setTeamLogoFile(null);
-      await loadTeamData();
+      await loadTeamData(res.data?.id);
+
+      if (isCreateRoute) {
+        navigate("/team");
+      }
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Create team failed."));
     } finally {
@@ -459,7 +506,7 @@ export function TeamDashboardPage() {
       toast.success(res.message);
       setTeam(res.data);
       setEditingTeam(false);
-      await loadTeamData();
+      await loadTeamData(selectedTeamId);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Update team failed."));
     } finally {
@@ -485,7 +532,7 @@ export function TeamDashboardPage() {
       const res = await removeTeamMember(team.id, member.user.id);
 
       toast.success(res.message);
-      await loadTeamData();
+      await loadTeamData(selectedTeamId);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Remove member failed."));
     } finally {
@@ -508,13 +555,28 @@ export function TeamDashboardPage() {
     try {
       setLoadingAction(true);
 
-      const res = await leaveTeam();
+      const res = await leaveTeam(team.id);
+      const nextTeamId = teams.find((item) => item.id !== team.id)?.id ?? null;
 
       toast.success(res.message);
       setEditingTeam(false);
-      await loadTeamData();
+      await loadTeamData(nextTeamId);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Leave team failed."));
+    } finally {
+      setLoadingAction(false);
+    }
+  }
+
+  async function handleSelectTeam(teamId: string) {
+    if (teamId === team?.id) return;
+
+    try {
+      setLoadingAction(true);
+      setEditingTeam(false);
+      await loadTeamData(teamId);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Switch team failed."));
     } finally {
       setLoadingAction(false);
     }
@@ -527,7 +589,7 @@ export function TeamDashboardPage() {
       const res = await acceptTeamInvite(inviteId);
 
       toast.success(res.message);
-      await loadTeamData();
+      await loadTeamData(selectedTeamId);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Accept invite failed."));
     } finally {
@@ -552,7 +614,7 @@ export function TeamDashboardPage() {
       const res = await rejectTeamInvite(inviteId);
 
       toast.success(res.message);
-      await loadTeamData();
+      await loadTeamData(selectedTeamId);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Reject invite failed."));
     } finally {
@@ -591,6 +653,198 @@ export function TeamDashboardPage() {
   const losses =
     ranking?.overall?.losses ?? ranking?.losses ?? team?.totalLosses ?? 0;
   const titles = ranking?.overall?.championCount ?? team?.championCount ?? 0;
+
+  if (isCreateRoute) {
+    return (
+      <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
+        <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(180deg,#050816_0%,#08111f_46%,#050816_100%)]" />
+        <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:64px_64px] opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent_88%)]" />
+
+        <div className="mx-auto max-w-7xl space-y-6">
+          <section className="rounded-[2rem] border border-white/10 bg-white/[0.055] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.32)] backdrop-blur-2xl sm:p-8">
+            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-black uppercase tracking-[0.2em] text-cyan-100">
+              <Users className="size-4" aria-hidden="true" />
+              Team Create
+            </span>
+            <h1 className="mt-5 max-w-4xl text-4xl font-black leading-[0.95] text-white sm:text-5xl">
+              Create a new roster.
+            </h1>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-400">
+              Captains can manage multiple active teams, but only one active
+              team per game. Use the dashboard to switch between your rosters.
+            </p>
+          </section>
+
+          <section className="grid gap-6 lg:grid-cols-[1fr_0.85fr]">
+            <PanelShell
+              icon={<Users className="size-6" />}
+              title="New Team"
+              description="Create a roster profile and start inviting players."
+            >
+              <div className="space-y-4">
+                <input
+                  value={teamName}
+                  onChange={(event) => setTeamName(event.target.value)}
+                  placeholder="Team name"
+                  className="w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <input
+                    value={teamGame}
+                    onChange={(event) => setTeamGame(event.target.value)}
+                    placeholder="Game"
+                    className="w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
+                  />
+                  <input
+                    value={teamRegion}
+                    onChange={(event) => setTeamRegion(event.target.value)}
+                    placeholder="Region"
+                    className="w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
+                  />
+                </div>
+                <textarea
+                  value={teamDescription}
+                  onChange={(event) => setTeamDescription(event.target.value)}
+                  placeholder="Description"
+                  className="min-h-28 w-full resize-none rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 focus:ring-4 focus:ring-cyan-300/10"
+                />
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) =>
+                    setTeamLogoFile(event.target.files?.[0] ?? null)
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-[#070b16] px-4 py-3 text-sm outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-cyan-300 file:px-3 file:py-2 file:font-black file:text-slate-950"
+                />
+                {teamLogoFile && (
+                  <p className="text-xs font-bold text-slate-500">
+                    Selected logo: {teamLogoFile.name}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCreateTeam}
+                  disabled={
+                    loadingAction ||
+                    !teamName.trim() ||
+                    !teamGame.trim() ||
+                    !teamRegion.trim()
+                  }
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 text-sm font-black text-slate-950 shadow-[0_18px_55px_rgba(103,232,249,0.18)] transition hover:-translate-y-0.5 hover:bg-cyan-200 disabled:opacity-50 disabled:hover:translate-y-0"
+                >
+                  {loadingAction ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Users className="size-4" />
+                  )}
+                  Create Team
+                </button>
+              </div>
+            </PanelShell>
+
+            <div className="space-y-6">
+              <PanelShell
+                icon={<Trophy className="size-6" />}
+                title="My Teams"
+                description="Switch to an existing roster when you need captain tools."
+              >
+                {teams.length === 0 ? (
+                  <EmptyState
+                    compact
+                    icon={Users}
+                    title="No teams yet"
+                    description="Created teams and accepted rosters will appear here."
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {teams.map((item) => (
+                      <Link
+                        key={item.id}
+                        to="/team"
+                        onClick={() => {
+                          void handleSelectTeam(item.id);
+                        }}
+                        className="flex items-center gap-3 rounded-[1.35rem] border border-white/10 bg-black/25 p-4 transition hover:border-cyan-300/30 hover:bg-cyan-300/10"
+                      >
+                        <TeamMark
+                          name={item.name}
+                          logoUrl={item.logoUrl}
+                          size="md"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate font-black text-white">
+                            {item.name}
+                          </p>
+                          <p className="mt-1 truncate text-sm text-slate-400">
+                            {item.game ?? "No game"} -{" "}
+                            {item.region ?? "No region"}
+                          </p>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </PanelShell>
+
+              <PanelShell
+                icon={<MailPlus className="size-6" />}
+                title="Pending Invites"
+                description="Accept or decline team invitations sent to your account."
+              >
+                {invites.length === 0 ? (
+                  <EmptyState
+                    compact
+                    icon={MailPlus}
+                    title="No pending invites"
+                    description="Team invitations sent to you will appear here."
+                  />
+                ) : (
+                  <div className="space-y-4">
+                    {invites.map((invite) => (
+                      <div
+                        key={invite.id}
+                        className="rounded-[1.35rem] border border-white/10 bg-black/25 p-5 shadow-[0_18px_70px_rgba(0,0,0,0.16)]"
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-lg font-black text-white">
+                              {invite.team.name}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-400">
+                              Invited by {invite.inviter.username}
+                            </p>
+                          </div>
+                          <StatusPill value={invite.status} />
+                        </div>
+                        <div className="mt-4 flex gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleAcceptInvite(invite.id)}
+                            disabled={loadingAction}
+                            className="rounded-2xl bg-emerald-300 px-4 py-2 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-emerald-200 disabled:opacity-50 disabled:hover:translate-y-0"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRejectInvite(invite.id)}
+                            disabled={loadingAction}
+                            className="rounded-2xl bg-red-300 px-4 py-2 text-sm font-black text-slate-950 transition hover:-translate-y-0.5 hover:bg-red-200 disabled:opacity-50 disabled:hover:translate-y-0"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </PanelShell>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#050816] px-4 py-10 text-white sm:px-6 lg:px-8">
@@ -695,6 +949,57 @@ export function TeamDashboardPage() {
             )}
           </section>
         </header>
+
+        {teams.length > 0 && (
+          <PanelShell
+            icon={<Trophy className="size-6" />}
+            title="My Teams"
+            description="Choose which roster this dashboard should manage."
+          >
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {teams.map((item) => {
+                const isSelected = item.id === selectedTeamId;
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectTeam(item.id)}
+                    disabled={loadingAction}
+                    className={[
+                      "flex min-h-20 items-center gap-3 rounded-[1.35rem] border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60",
+                      isSelected
+                        ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+                        : "border-white/10 bg-black/25 text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/10",
+                    ].join(" ")}
+                  >
+                    <TeamMark
+                      name={item.name}
+                      logoUrl={item.logoUrl}
+                      size="md"
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate font-black">
+                        {item.name}
+                      </span>
+                      <span className="mt-1 block truncate text-sm text-slate-400">
+                        {item.game ?? "No game"} - {item.region ?? "No region"}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+
+              <Link
+                to="/team/create"
+                className="flex min-h-20 items-center justify-center gap-2 rounded-[1.35rem] border border-cyan-300/25 bg-cyan-300/10 p-4 text-sm font-black text-cyan-100 transition hover:-translate-y-0.5 hover:bg-cyan-300/20"
+              >
+                <Users className="size-4" />
+                Create Team
+              </Link>
+            </div>
+          </PanelShell>
+        )}
 
         {team && editingTeam && (
           <PanelShell
@@ -1142,7 +1447,7 @@ export function TeamDashboardPage() {
                             >
                               Match Room
                             </Link>
-                            {match.status === "IN_PROGRESS" &&
+                            {["LIVE", "IN_PROGRESS"].includes(match.status) &&
                               match.livestreamUrl && (
                                 <a
                                   href={match.livestreamUrl}

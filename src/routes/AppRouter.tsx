@@ -1,111 +1,148 @@
 import { MainLayout } from "@/layouts/MainLayout";
-import { AdminDashboardPage } from "@/pages/AdminDashboardPage";
-import { AdminOrganizerApprovalPage } from "@/pages/AdminOrganizerApprovalPage";
-import { AdminTournamentApprovalPage } from "@/pages/AdminTournamentApprovalPage";
-import { BecomeOrganizerPage } from "@/pages/BecomeOrganizerPage";
-import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
-import { LandingPage } from "@/pages/LandingPage";
-import { LoginPage } from "@/pages/LoginPage";
-import { MatchRoomPage } from "@/pages/MatchRoomPage";
-import { OrganizerDashboardPage } from "@/pages/OrganizerDashboardPage";
-import { ProfilePage } from "@/pages/ProfilePage";
-import { PlayerProfilePage } from "@/pages/PlayerProfilePage";
-import { RegisterPage } from "@/pages/RegisterPage";
-import { TeamDashboardPage } from "@/pages/TeamDashboardPage";
-import { TeamProfilePage } from "@/pages/TeamProfilePage";
-import { TournamentDetailPage } from "@/pages/TournamentDetailPage";
-import { TournamentListPage } from "@/pages/TournamentListPage";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { PublicOnlyRoute, RoleRoute } from "./RoleRoute";
+
+const loadAdminDashboard = async () => ({
+  Component: (await import("@/pages/AdminDashboardPage")).AdminDashboardPage,
+});
+const loadAdminOrganizerApproval = async () => ({
+  Component: (await import("@/pages/AdminOrganizerApprovalPage"))
+    .AdminOrganizerApprovalPage,
+});
+const loadAdminTournamentApproval = async () => ({
+  Component: (await import("@/pages/AdminTournamentApprovalPage"))
+    .AdminTournamentApprovalPage,
+});
+const loadBecomeOrganizer = async () => ({
+  Component: (await import("@/pages/BecomeOrganizerPage")).BecomeOrganizerPage,
+});
+const loadForgotPassword = async () => ({
+  Component: (await import("@/pages/ForgotPasswordPage")).ForgotPasswordPage,
+});
+const loadLanding = async () => ({
+  Component: (await import("@/pages/LandingPage")).LandingPage,
+});
+const loadLogin = async () => ({
+  Component: (await import("@/pages/LoginPage")).LoginPage,
+});
+const loadMatchRoom = async () => ({
+  Component: (await import("@/pages/MatchRoomPage")).MatchRoomPage,
+});
+const loadOrganizerDashboard = async () => ({
+  Component: (await import("@/pages/OrganizerDashboardPage"))
+    .OrganizerDashboardPage,
+});
+const loadProfile = async () => ({
+  Component: (await import("@/pages/ProfilePage")).ProfilePage,
+});
+const loadPlayerProfile = async () => ({
+  Component: (await import("@/pages/PlayerProfilePage")).PlayerProfilePage,
+});
+const loadRegister = async () => ({
+  Component: (await import("@/pages/RegisterPage")).RegisterPage,
+});
+const loadTeamDashboard = async () => ({
+  Component: (await import("@/pages/TeamDashboardPage")).TeamDashboardPage,
+});
+const loadTeamProfile = async () => ({
+  Component: (await import("@/pages/TeamProfilePage")).TeamProfilePage,
+});
+const loadTournamentDetail = async () => ({
+  Component: (await import("@/pages/TournamentDetailPage"))
+    .TournamentDetailPage,
+});
+const loadTournamentList = async () => ({
+  Component: (await import("@/pages/TournamentListPage")).TournamentListPage,
+});
 
 const router = createBrowserRouter([
   {
     path: "/",
     element: <MainLayout />,
     children: [
-      { index: true, element: <LandingPage /> },
-      { path: "tournaments", element: <TournamentListPage /> },
-      { path: "tournaments/:id", element: <TournamentDetailPage /> },
-      { path: "tournaments/:id/bracket", element: <TournamentDetailPage /> },
+      { index: true, lazy: loadLanding },
+      { path: "tournaments", lazy: loadTournamentList },
+      { path: "tournaments/:id", lazy: loadTournamentDetail },
+      { path: "tournaments/:id/bracket", lazy: loadTournamentDetail },
       {
         path: "tournaments/:id/leaderboard",
-        element: <TournamentDetailPage />,
+        lazy: loadTournamentDetail,
       },
-      { path: "brackets/:id", element: <TournamentDetailPage /> },
-      { path: "leaderboards/:id", element: <TournamentDetailPage /> },
-      { path: "teams/:id", element: <TeamProfilePage /> },
-      { path: "players/:id", element: <PlayerProfilePage /> },
+      { path: "brackets/:id", lazy: loadTournamentDetail },
+      { path: "leaderboards/:id", lazy: loadTournamentDetail },
+      { path: "teams/:id", lazy: loadTeamProfile },
+      { path: "players/:id", lazy: loadPlayerProfile },
       {
         element: <PublicOnlyRoute />,
         children: [
-          { path: "login", element: <LoginPage /> },
-          { path: "forgot-password", element: <ForgotPasswordPage /> },
-          { path: "register", element: <RegisterPage /> },
+          { path: "login", lazy: loadLogin },
+          { path: "forgot-password", lazy: loadForgotPassword },
+          { path: "register", lazy: loadRegister },
         ],
       },
       {
         element: <ProtectedRoute />,
         children: [
-          { path: "profile", element: <ProfilePage /> },
-          { path: "profile/settings", element: <ProfilePage /> },
-          { path: "matches/:id", element: <MatchRoomPage /> },
+          { path: "profile", lazy: loadProfile },
+          { path: "profile/settings", lazy: loadProfile },
+          { path: "matches/:id", lazy: loadMatchRoom },
           {
-            element: <RoleRoute allowedRoles={["PLAYER", "ORGANIZER"]} />,
+            element: <RoleRoute allowedRoles={["PLAYER"]} />,
             children: [
-              { path: "player", element: <TeamDashboardPage /> },
-              { path: "team", element: <TeamDashboardPage /> },
-              { path: "team/create", element: <TeamDashboardPage /> },
-              { path: "team/invites", element: <TeamDashboardPage /> },
-              { path: "team/matches", element: <TeamDashboardPage /> },
-              { path: "become-organizer", element: <BecomeOrganizerPage /> },
+              { path: "player", lazy: loadTeamDashboard },
+              { path: "team", lazy: loadTeamDashboard },
+              { path: "team/create", lazy: loadTeamDashboard },
+              { path: "team/invites", lazy: loadTeamDashboard },
+              { path: "team/matches", lazy: loadTeamDashboard },
+              { path: "become-organizer", lazy: loadBecomeOrganizer },
             ],
           },
           {
             element: <RoleRoute allowedRoles={["ORGANIZER"]} />,
             children: [
-              { path: "organizer", element: <OrganizerDashboardPage /> },
+              { path: "organizer", lazy: loadOrganizerDashboard },
               {
                 path: "organizer/tournaments/new",
-                element: <OrganizerDashboardPage />,
+                lazy: loadOrganizerDashboard,
               },
               {
                 path: "organizer/tournaments/:id",
-                element: <OrganizerDashboardPage />,
+                lazy: loadOrganizerDashboard,
               },
               {
                 path: "organizer/registrations",
-                element: <OrganizerDashboardPage />,
+                lazy: loadOrganizerDashboard,
               },
-              { path: "organizer/brackets", element: <OrganizerDashboardPage /> },
-              { path: "organizer/matches", element: <OrganizerDashboardPage /> },
-              { path: "organizer/disputes", element: <OrganizerDashboardPage /> },
+              { path: "organizer/brackets", lazy: loadOrganizerDashboard },
+              { path: "organizer/matches", lazy: loadOrganizerDashboard },
+              { path: "organizer/disputes", lazy: loadOrganizerDashboard },
               {
                 path: "organizer/analytics",
-                element: <OrganizerDashboardPage />,
+                lazy: loadOrganizerDashboard,
               },
               {
                 path: "organizer/announcements",
-                element: <OrganizerDashboardPage />,
+                lazy: loadOrganizerDashboard,
               },
             ],
           },
           {
             element: <RoleRoute allowedRoles={["ADMIN"]} />,
             children: [
-              { path: "admin", element: <AdminDashboardPage /> },
-              { path: "admin/users", element: <AdminDashboardPage /> },
-              { path: "admin/tournaments", element: <AdminDashboardPage /> },
-              { path: "admin/disputes", element: <AdminDashboardPage /> },
-              { path: "admin/audit-logs", element: <AdminDashboardPage /> },
-              { path: "admin/analytics", element: <AdminDashboardPage /> },
+              { path: "admin", lazy: loadAdminDashboard },
+              { path: "admin/users", lazy: loadAdminDashboard },
+              { path: "admin/tournaments", lazy: loadAdminDashboard },
+              { path: "admin/disputes", lazy: loadAdminDashboard },
+              { path: "admin/audit-logs", lazy: loadAdminDashboard },
+              { path: "admin/analytics", lazy: loadAdminDashboard },
               {
                 path: "admin/organizer-requests",
-                element: <AdminOrganizerApprovalPage />,
+                lazy: loadAdminOrganizerApproval,
               },
               {
                 path: "admin/tournament-approvals",
-                element: <AdminTournamentApprovalPage />,
+                lazy: loadAdminTournamentApproval,
               },
             ],
           },

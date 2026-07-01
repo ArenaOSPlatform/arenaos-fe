@@ -5,13 +5,14 @@ import {
   roleHomePath,
   type UserRole,
 } from "./route-role";
+import { clearStoredTokens, getAccessToken } from "@/utils/authStorage";
 
 type RoleRouteProps = {
   allowedRoles: UserRole[];
 };
 
 export function RoleRoute({ allowedRoles }: RoleRouteProps) {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
 
   if (!token) {
     return <Navigate to="/login" replace />;
@@ -20,8 +21,7 @@ export function RoleRoute({ allowedRoles }: RoleRouteProps) {
   const role = getCurrentUserRole();
 
   if (!role) {
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
+    clearStoredTokens();
     clearStoredUserRole();
     return <Navigate to="/login" replace />;
   }
@@ -34,7 +34,7 @@ export function RoleRoute({ allowedRoles }: RoleRouteProps) {
 }
 
 export function PublicOnlyRoute() {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
 
   if (!token) {
     return <Outlet />;
@@ -43,8 +43,7 @@ export function PublicOnlyRoute() {
   const role = getCurrentUserRole();
 
   if (!role) {
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
+    clearStoredTokens();
     clearStoredUserRole();
     return <Outlet />;
   }

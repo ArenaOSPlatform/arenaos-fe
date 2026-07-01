@@ -71,9 +71,14 @@ const adminFilterOptions = [
   "OPEN_REGISTRATION",
   "REGISTRATION_CLOSED",
   "BRACKET_GENERATED",
+  "PENDING_SCHEDULE",
+  "SCHEDULED",
   "MATCH_SCHEDULED",
+  "CHECK_IN_OPEN",
   "READY",
+  "LIVE",
   "IN_PROGRESS",
+  "WAITING_CONFIRMATION",
   "COMPLETED",
   "OPEN",
   "RESOLVED",
@@ -183,6 +188,10 @@ function formatDate(value: string | null) {
   }).format(date);
 }
 
+function formatStatus(value: string) {
+  return value.replaceAll("_", " ");
+}
+
 function getInitials(value: string) {
   const initials = value
     .trim()
@@ -196,7 +205,14 @@ function getInitials(value: string) {
 
 function getStatusTone(value: string): Tone {
   if (
-    ["ACTIVE", "RESOLVED", "COMPLETED", "READY", "APPROVED"].includes(value)
+    [
+      "ACTIVE",
+      "RESOLVED",
+      "COMPLETED",
+      "READY",
+      "LIVE",
+      "APPROVED",
+    ].includes(value)
   ) {
     return "emerald";
   }
@@ -209,8 +225,12 @@ function getStatusTone(value: string): Tone {
     [
       "SUSPENDED",
       "PENDING_APPROVAL",
+      "PENDING_SCHEDULE",
+      "SCHEDULED",
       "MATCH_SCHEDULED",
+      "CHECK_IN_OPEN",
       "IN_PROGRESS",
+      "WAITING_CONFIRMATION",
     ].includes(value)
   ) {
     return "amber";
@@ -269,6 +289,7 @@ function KpiCard({
   helper,
   tone,
   index,
+  barPercent = 64,
 }: {
   icon: ReactNode;
   label: string;
@@ -276,6 +297,7 @@ function KpiCard({
   helper?: ReactNode;
   tone: Tone;
   index: number;
+  barPercent?: number;
 }) {
   return (
     <motion.article
@@ -291,7 +313,7 @@ function KpiCard({
           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
             {label}
           </p>
-          <p className="mt-3 text-4xl font-black leading-none tracking-[-0.04em] text-white">
+          <p className="font-display mt-3 text-4xl font-black leading-none tracking-[-0.04em] text-white">
             {value}
           </p>
           {helper && <p className="mt-2 text-sm text-slate-400">{helper}</p>}
@@ -302,21 +324,21 @@ function KpiCard({
           {icon}
         </span>
       </div>
-      <div className="mt-5 h-1.5 rounded-full bg-black/25">
+      <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-black/25">
         <div
           className={[
-            "h-full rounded-full",
+            "h-full rounded-full transition-all duration-1000",
             tone === "cyan"
-              ? "bg-cyan-300"
+              ? "bg-gradient-to-r from-cyan-400 to-sky-300"
               : tone === "emerald"
-                ? "bg-emerald-300"
+                ? "bg-gradient-to-r from-emerald-400 to-green-300"
                 : tone === "amber"
-                  ? "bg-amber-300"
+                  ? "bg-gradient-to-r from-amber-400 to-yellow-300"
                   : tone === "red"
-                    ? "bg-red-300"
-                    : "bg-violet-300",
+                    ? "bg-gradient-to-r from-red-400 to-rose-300"
+                    : "bg-gradient-to-r from-violet-400 to-purple-300",
           ].join(" ")}
-          style={{ width: "64%" }}
+          style={{ width: `${Math.max(4, Math.min(100, barPercent))}%` }}
         />
       </div>
     </motion.article>
@@ -601,6 +623,9 @@ export function AdminDashboardPage() {
     decision: ResolveDisputeDecision,
   ) {
     const dispute = disputes.find((item) => item.id === disputeId);
+    const decisionReason = `Admin resolved this dispute with ${formatStatus(
+      decision,
+    ).toLowerCase()}.`;
     const confirmed = await confirm({
       title: "Resolve dispute?",
       description: `Apply ${decision} to "${dispute?.reason ?? "this dispute"}".`,
@@ -612,7 +637,7 @@ export function AdminDashboardPage() {
 
     try {
       setResolvingDisputeId(disputeId);
-      const res = await resolveDispute(disputeId, { decision });
+      const res = await resolveDispute(disputeId, { decision, decisionReason });
       toast.success(res.message);
       await loadDashboard();
     } catch (err) {
@@ -632,7 +657,14 @@ export function AdminDashboardPage() {
     (item) => item.status === "PENDING_APPROVAL",
   ).length;
   const runningTournaments = tournaments.filter((item) =>
-    ["READY", "MATCH_SCHEDULED", "IN_PROGRESS"].includes(item.status),
+    [
+      "READY",
+      "SCHEDULED",
+      "MATCH_SCHEDULED",
+      "LIVE",
+      "IN_PROGRESS",
+      "ONGOING",
+    ].includes(item.status),
   ).length;
 
   const filteredUsers = useMemo(
@@ -845,7 +877,7 @@ export function AdminDashboardPage() {
               )}
             </div>
 
-            <h1 className="mt-7 max-w-4xl text-4xl font-black leading-[0.95] tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl">
+            <h1 className="font-display mt-7 max-w-4xl text-4xl font-black leading-[0.95] tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl">
               System Management
             </h1>
             <p className="mt-5 max-w-3xl text-base leading-8 text-slate-300">
@@ -935,6 +967,7 @@ export function AdminDashboardPage() {
             value={users.length}
             helper={`${activeUsers} active`}
             tone="cyan"
+            barPercent={users.length > 0 ? Math.round((activeUsers / users.length) * 100) : 0}
           />
           <KpiCard
             index={1}
@@ -943,6 +976,7 @@ export function AdminDashboardPage() {
             value={teams.length}
             helper={`${teams.reduce((sum, team) => sum + (team._count?.members ?? 0), 0)} members`}
             tone="violet"
+            barPercent={Math.min(100, teams.length * 5)}
           />
           <KpiCard
             index={2}
@@ -951,6 +985,7 @@ export function AdminDashboardPage() {
             value={tournaments.length}
             helper={`${runningTournaments} running`}
             tone="amber"
+            barPercent={tournaments.length > 0 ? Math.round((runningTournaments / tournaments.length) * 100) : 0}
           />
           <KpiCard
             index={3}
@@ -959,6 +994,7 @@ export function AdminDashboardPage() {
             value={disputes.length}
             helper={`${openDisputes} open`}
             tone="red"
+            barPercent={disputes.length > 0 ? Math.round((openDisputes / disputes.length) * 100) : 0}
           />
           <KpiCard
             index={4}
@@ -967,6 +1003,7 @@ export function AdminDashboardPage() {
             value={auditLogs.length}
             helper="tracked actions"
             tone="emerald"
+            barPercent={Math.min(100, auditLogs.length * 2)}
           />
         </section>
 

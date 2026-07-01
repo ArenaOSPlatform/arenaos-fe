@@ -6,6 +6,8 @@ export type UploadResponse = {
     filename: string;
     path: string;
     url: string;
+    provider?: "LOCAL" | "CLOUDINARY" | string;
+    publicId?: string;
   };
 };
 

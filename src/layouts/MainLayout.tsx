@@ -26,13 +26,14 @@ import {
   markAllNotificationsAsRead,
   markNotificationAsRead,
 } from "@/services/notification.service";
-import { socket } from "@/sockets/socket";
+import { connectSocket, socket } from "@/sockets/socket";
 import { acceptTeamInvite, rejectTeamInvite } from "@/services/team.service";
 import { getCurrentUserRole, setStoredUserRole } from "@/routes/route-role";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ModeToggle } from "@/components/ui/ModeToggle";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useToast } from "@/hooks/useToast";
+import { getAccessToken } from "@/utils/authStorage";
 
 type Notification = {
   id: string;
@@ -54,14 +55,17 @@ function NavLinkItem({
   to,
   children,
   onClick,
+  exact = false,
 }: {
   to: string;
   children: React.ReactNode;
   onClick?: () => void;
+  exact?: boolean;
 }) {
   const location = useLocation();
-  const isActive =
-    to === "/"
+  const isActive = exact
+    ? location.pathname === to
+    : to === "/"
       ? location.pathname === "/"
       : location.pathname.startsWith(to);
 
@@ -195,7 +199,7 @@ export function MainLayout() {
     string | null
   >(null);
   const [authenticated, setAuthenticated] = useState(() =>
-    Boolean(localStorage.getItem("accessToken")),
+    Boolean(getAccessToken()),
   );
 
   const location = useLocation();
@@ -212,7 +216,7 @@ export function MainLayout() {
 
   useEffect(() => {
     async function setupNotifications() {
-      const token = localStorage.getItem("accessToken");
+      const token = getAccessToken();
       if (!token) {
         setAuthenticated(false);
         setNotifications([]);
@@ -225,16 +229,13 @@ export function MainLayout() {
 
       try {
         const meRes = await getMe();
-        const userId = meRes.data.sub;
         const role = meRes.data.role;
 
         if (role === "PLAYER" || role === "ORGANIZER" || role === "ADMIN") {
           setStoredUserRole(role);
         }
 
-        if (!socket.connected) socket.connect();
-
-        socket.emit("join:user-notifications", userId);
+        connectSocket();
 
         const notiRes = await getMyNotifications();
         setNotifications(notiRes.data);
@@ -382,7 +383,7 @@ export function MainLayout() {
         Match Room
       </NavLinkItem>
 
-      {(userRole === "PLAYER" || userRole === "ORGANIZER") && (
+      {userRole === "PLAYER" && (
         <>
           <NavLinkItem to="/team">
             <Users className="size-4" />

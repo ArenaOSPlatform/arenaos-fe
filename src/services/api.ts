@@ -6,12 +6,20 @@ import {
   setStoredUserRole,
   type UserRole,
 } from "@/routes/route-role";
+import {
+  clearLegacyRefreshToken,
+  clearStoredTokens,
+  getAccessToken,
+  getLegacyRefreshToken,
+  setAccessToken,
+} from "@/utils/authStorage";
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
 });
 
 export const authSessionExpiredEvent = "arenaos:auth-session-expired";
@@ -23,7 +31,6 @@ type RetryableRequestConfig = InternalAxiosRequestConfig & {
 type RefreshResponse = {
   data?: {
     accessToken?: string;
-    refreshToken?: string;
     role?: UserRole;
     user?: {
       role?: UserRole;
@@ -46,8 +53,7 @@ function setAuthorizationHeader(
 export function clearAuthStorage(options: { notify?: boolean } = {}) {
   const { notify = true } = options;
 
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("refreshToken");
+  clearStoredTokens();
   clearStoredUserRole();
 
   if (notify) {
@@ -67,16 +73,18 @@ function shouldSkipRefresh(url?: string) {
   ].some((path) => url?.includes(path));
 }
 
-async function refreshAccessToken(refreshToken: string) {
+async function refreshAccessToken() {
   if (!refreshRequest) {
+    const legacyRefreshToken = getLegacyRefreshToken();
     refreshRequest = axios
       .post<RefreshResponse>(
         `${API_BASE_URL}/auth/refresh-token`,
         {},
         {
-          headers: {
-            Authorization: `Bearer ${refreshToken}`,
-          },
+          withCredentials: true,
+          headers: legacyRefreshToken
+            ? { Authorization: `Bearer ${legacyRefreshToken}` }
+            : undefined,
         },
       )
       .then((res) => res.data.data)
@@ -90,14 +98,13 @@ async function refreshAccessToken(refreshToken: string) {
 
 function storeAuthTokens(data: RefreshResponse["data"]) {
   const accessToken = data?.accessToken;
-  const refreshToken = data?.refreshToken;
 
-  if (!accessToken || !refreshToken) {
-    throw new Error("Refresh response did not include tokens");
+  if (!accessToken) {
+    throw new Error("Refresh response did not include an access token");
   }
 
-  localStorage.setItem("accessToken", accessToken);
-  localStorage.setItem("refreshToken", refreshToken);
+  setAccessToken(accessToken);
+  clearLegacyRefreshToken();
 
   const role = data.role ?? data.user?.role;
 
@@ -109,7 +116,7 @@ function storeAuthTokens(data: RefreshResponse["data"]) {
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("accessToken");
+  const token = getAccessToken();
 
   if (token) {
     setAuthorizationHeader(config, token);
@@ -136,17 +143,10 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    const refreshToken = localStorage.getItem("refreshToken");
-
-    if (!refreshToken) {
-      clearAuthStorage();
-      return Promise.reject(error);
-    }
-
     originalRequest._retry = true;
 
     try {
-      const refreshData = await refreshAccessToken(refreshToken);
+      const refreshData = await refreshAccessToken();
       const accessToken = storeAuthTokens(refreshData);
 
       setAuthorizationHeader(originalRequest, accessToken);

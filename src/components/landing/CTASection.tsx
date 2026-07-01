@@ -58,13 +58,40 @@ export function CTASection() {
         initial="hidden"
         whileInView="visible"
         viewport={{ once: true, margin: "-120px" }}
-        className="relative mx-auto max-w-5xl overflow-hidden rounded-[2.25rem] border border-cyan-300/20 bg-white/[0.055] px-6 py-12 text-center shadow-[0_32px_110px_rgba(0,0,0,0.35)] backdrop-blur-2xl sm:px-10 md:px-16 md:py-16"
+        className="relative mx-auto max-w-5xl overflow-hidden rounded-[2.25rem] border border-cyan-300/20 bg-white/[0.055] px-6 py-12 text-center shadow-[0_32px_110px_rgba(0,0,0,0.35),0_0_80px_rgba(34,211,238,0.06)_inset] backdrop-blur-2xl sm:px-10 md:px-16 md:py-16"
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-violet-300/30 to-transparent" />
         <div className="pointer-events-none absolute -left-28 -top-28 size-72 rounded-full bg-cyan-300/15 blur-3xl" />
         <div className="pointer-events-none absolute -right-28 bottom-0 size-72 rounded-full bg-violet-400/15 blur-3xl" />
 
-        <div className="relative mx-auto mb-8 flex size-16 items-center justify-center rounded-3xl bg-cyan-300 text-slate-950 shadow-[0_24px_70px_rgba(34,211,238,0.28)] ring-1 ring-cyan-100/50">
+        {/* Floating particles */}
+        {!shouldReduceMotion && (
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+            {[
+              { left: "15%",  size: 4, delay: "0s",    dur: "5s"  },
+              { left: "30%",  size: 3, delay: "1.2s",  dur: "6s"  },
+              { left: "50%",  size: 5, delay: "0.5s",  dur: "4.5s"},
+              { left: "68%",  size: 3, delay: "2s",    dur: "7s"  },
+              { left: "82%",  size: 4, delay: "0.8s",  dur: "5.5s"},
+            ].map((p, i) => (
+              <span
+                key={i}
+                className="arena-particle bg-cyan-300/25"
+                style={{
+                  left: p.left,
+                  bottom: "10%",
+                  width: p.size,
+                  height: p.size,
+                  animationDelay: p.delay,
+                  animationDuration: p.dur,
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="group relative mx-auto mb-8 flex size-16 items-center justify-center rounded-3xl bg-cyan-300 text-slate-950 shadow-[0_24px_70px_rgba(34,211,238,0.28)] ring-1 ring-cyan-100/50 transition duration-500 hover:rotate-12 hover:scale-110">
           <Trophy className="size-8" aria-hidden="true" />
         </div>
 
@@ -72,7 +99,7 @@ export function CTASection() {
           ENTER THE ARENA
         </p>
 
-        <h2 className="relative mx-auto mt-5 max-w-4xl text-balance text-4xl font-black leading-[1.02] tracking-[-0.045em] text-white md:text-6xl">
+        <h2 className="font-display relative mx-auto mt-5 max-w-4xl text-balance text-4xl font-black leading-[1.02] tracking-[-0.045em] text-white md:text-6xl">
           Ready to launch your next esports tournament?
         </h2>
 

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@700;800&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -11,6 +11,7 @@
   --arena-text: #ffffff;
   --arena-text-muted: #94a3b8;
   --arena-shadow: 0 24px 90px rgba(0, 0, 0, 0.24);
+  --arena-font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
 }
 
 html[data-theme="light"] {
@@ -28,6 +29,13 @@ html[data-theme="light"] {
 html {
   scroll-behavior: smooth;
   font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* Display / hero headings use Space Grotesk */
+.font-display {
+  font-family: var(--arena-font-display);
+  letter-spacing: -0.04em;
+  font-weight: 800;
 }
 
 html,
@@ -346,3 +354,105 @@ html[data-theme="light"] [class*="shadow-[inset_"] {
   0%, 100% { opacity: 0.4; transform: scale(0.9); }
   50% { opacity: 0.9; transform: scale(1.1); }
 }
+
+/* Border beam — animated light running along card border */
+@keyframes border-beam {
+  0% { offset-distance: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+/* Gradient text shimmer */
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Float up — for CTA particles */
+@keyframes float-up {
+  0%   { transform: translateY(0) scale(1); opacity: 0.7; }
+  100% { transform: translateY(-120px) scale(0.4); opacity: 0; }
+}
+
+/* Live pulse ring for ONGOING indicator */
+@keyframes live-ring {
+  0%   { transform: scale(1); opacity: 0.7; }
+  80%  { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* Number pop — subtle scale when counter updates */
+@keyframes number-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* Animated gradient text utility */
+.arena-gradient-text {
+  background: linear-gradient(
+    135deg,
+    #67e8f9 0%,
+    #a5f3fc 20%,
+    #818cf8 45%,
+    #c4b5fd 65%,
+    #67e8f9 100%
+  );
+  background-size: 300% 300%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradient-shift 6s ease infinite;
+}
+
+/* Live dot indicator */
+.arena-live-dot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.arena-live-dot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: live-ring 1.6s ease-out infinite;
+}
+
+/* CTA floating particle */
+.arena-particle {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: float-up linear infinite;
+}
+
+/* Glowing card utility — adds inner glow on hover */
+.arena-glow-card {
+  transition:
+    transform 300ms ease,
+    box-shadow 300ms ease,
+    border-color 300ms ease;
+}
+
+.arena-glow-card:hover {
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.2),
+    0 28px 80px rgba(34, 211, 238, 0.1),
+    0 0 60px rgba(34, 211, 238, 0.06) inset;
+}
+
+/* Win-rate bar accent colors */
+.arena-bar-high  { background: linear-gradient(90deg, #34d399, #6ee7b7); }
+.arena-bar-mid   { background: linear-gradient(90deg, #fbbf24, #fde68a); }
+.arena-bar-low   { background: linear-gradient(90deg, #f87171, #fca5a5); }
+
+/* Rank badge gradients */
+.arena-rank-gold   { background: linear-gradient(135deg, #f59e0b, #fbbf24); color: #0f172a; }
+.arena-rank-silver { background: linear-gradient(135deg, #94a3b8, #cbd5e1); color: #0f172a; }
+.arena-rank-bronze { background: linear-gradient(135deg, #b45309, #d97706); color: #fff; }
