@@ -132,7 +132,7 @@ function MatchCard({
           : "border-white/10 bg-black/25 hover:border-white/20 hover:bg-black/35",
       ].join(" ")}
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/40 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-cyan-300/40 to-transparent opacity-0 transition duration-300 group-hover:opacity-100" />
 
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
@@ -158,16 +158,16 @@ function MatchCard({
       <TeamSlot name={match.left} active={match.winner === match.left} />
 
       <div className="relative my-3 flex items-center gap-2">
-        <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/15" />
+        <div className="h-px flex-1 bg-linear-to-r from-transparent to-white/15" />
         <span className="rounded-full border border-white/10 bg-black/40 px-2.5 py-0.5 text-[10px] font-black tracking-[0.22em] text-slate-500">
           VS
         </span>
-        <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/15" />
+        <div className="h-px flex-1 bg-linear-to-l from-transparent to-white/15" />
       </div>
 
       <TeamSlot name={match.right} active={match.winner === match.right} />
 
-      <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.055] p-3 text-center">
+      <div className="mt-5 rounded-2xl border border-white/10 bg-white/5.5 p-3 text-center">
         <p className="text-sm font-black text-cyan-200">{match.score}</p>
       </div>
     </motion.article>
@@ -181,9 +181,9 @@ function CurrentMatchPanel({ currentMatch }: { currentMatch?: Match }) {
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: "-100px" }}
-      className="relative overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-cyan-300/[0.085] p-6 shadow-[0_28px_90px_rgba(8,145,178,0.14)] backdrop-blur-2xl"
+      className="relative overflow-hidden rounded-4xl border border-cyan-300/20 bg-cyan-300/8.5 p-6 shadow-[0_28px_90px_rgba(8,145,178,0.14)] backdrop-blur-2xl"
     >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-cyan-200/70 to-transparent" />
       <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-300/15 blur-3xl" />
 
       <div className="relative mb-6 flex size-14 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950 shadow-[0_20px_60px_rgba(34,211,238,0.24)]">
@@ -262,7 +262,7 @@ export function BracketPreviewSection({
   return (
     <section className="relative isolate overflow-hidden border-t border-white/10 bg-[#050816] px-5 py-24 text-white sm:px-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_15%_10%,rgba(139,92,246,0.18),transparent_30%),radial-gradient(circle_at_85%_30%,rgba(34,211,238,0.14),transparent_28%),linear-gradient(180deg,#050816_0%,#070B16_48%,#050816_100%)]" />
-      <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:72px_72px] opacity-30 [mask-image:radial-gradient(circle_at_center,black,transparent_72%)]" />
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-size-[72px_72px] opacity-30 mask-[radial-gradient(circle_at_center,black,transparent_72%)]" />
 
       <div className="mx-auto max-w-7xl">
         <motion.div
@@ -291,9 +291,9 @@ export function BracketPreviewSection({
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-100px" }}
-            className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.045] p-5 shadow-[0_28px_90px_rgba(0,0,0,0.32)] backdrop-blur-2xl sm:p-6"
+            className="relative overflow-hidden rounded-4xl border border-white/10 bg-white/4.5 p-5 shadow-[0_28px_90px_rgba(0,0,0,0.32)] backdrop-blur-2xl sm:p-6"
           >
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/50 to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-violet-300/50 to-transparent" />
             <div className="pointer-events-none absolute -left-20 -top-20 h-60 w-60 rounded-full bg-violet-400/10 blur-3xl" />
 
             <div className="relative mb-8 flex items-start gap-4">
